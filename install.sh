@@ -715,6 +715,18 @@ env_set() {
     fi
 }
 
+
+cleanup_mysql_binlogs() {
+    local root_pass
+    root_pass=$(env_get MYSQL_ROOT_PASSWORD 2>/dev/null || true)
+
+    [ -z "$root_pass" ] && return 0
+
+    dc exec -T db mysql -uroot -p"${root_pass}" \
+        -e "PURGE BINARY LOGS BEFORE DATE_SUB(NOW(), INTERVAL 7 DAY);" \
+        >/dev/null 2>&1 || true
+}
+
 cache_get() {
     local key="$1" max_age="$2"
     local file="${CACHE_DIR}/${key}"
@@ -1799,6 +1811,7 @@ install_bot() {
         fi
     fi
     ui_ok "Database is ready for connections."
+    cleanup_mysql_binlogs
 
     ui_action "Waiting for config.php to finish templating from environment..."
     if ! wait_for_config_templated 60 app; then
@@ -2034,6 +2047,7 @@ EOF
         return 1
     fi
     ui_ok "Database is ready for connections."
+    cleanup_mysql_binlogs
 
     ui_action "Waiting for '${botname}' config.php to finish templating from environment..."
     if ! wait_for_config_templated 60 "app_${botname}"; then
