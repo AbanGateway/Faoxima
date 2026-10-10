@@ -153,7 +153,7 @@ function rxResolveProductForPanel($productToken, $panelName, $agent = null, $cat
 }
 }
 
-function KeyboardProduct($location,$query,$pricediscount,$datakeyboard,$statuscustom = false,$backuser = "backuser", $valuetow = null,$customvolume = "customsellvolume", $agentFilter = null, $params = []){
+function KeyboardProduct($location,$query,$pricediscount,$datakeyboard,$statuscustom = false,$backuser = "backuser", $valuetow = null,$customvolume = "customsellvolume", $agentFilter = null, $params = [], $excludeHiddenPanels = false){
     global $pdo,$textbotlang,$from_id;
     $product = ['inline_keyboard' => []];
     $statusshowprice = panel_feature_enabled($location, 'showprice') ? "onshowprice" : "offshowprice";
@@ -201,6 +201,9 @@ function KeyboardProduct($location,$query,$pricediscount,$datakeyboard,$statuscu
                 error_log(sprintf('Invalid hide_panel JSON for product #%s: %s', $result['id'] ?? 'unknown', json_last_error_msg()));
             }
             $hide_panel = [];
+        }
+        if ($excludeHiddenPanels && in_array((string)$location, array_map('strval', $hide_panel), true)) {
+            continue;
         }
 
 
