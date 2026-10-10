@@ -2284,6 +2284,9 @@ class ManagePanel
             );
         }
         $rxMode = rxRenewalMode($Method_extend);
+        if (($rxOptions['source'] ?? '') === 'payment' && rxReservationStoredSelection($rxOptions['reservation'] ?? null) !== null) {
+            $rxMode = rxRenewalMode('رزرو اشتراک');
+        }
         if ($rxMode === null) {
             rx_pf_log('RENEWAL_UNKNOWN_METHOD', 'Unknown Methodextend; renewal refused without panel mutation', array(
                 'method' => (string) $Method_extend,
@@ -2407,22 +2410,19 @@ class ManagePanel
 
     private function rxRenewalRegisterReservation(array $panel, $invoice, array $product, $code_product, $new_limit, $time_day, $username, array $snapshot, array $rxOptions)
     {
-        $selection = is_array($rxOptions['reservation'] ?? null) ? $rxOptions['reservation'] : array();
+        $paymentRef = (string) (($rxOptions['reservation']['payment_ref'] ?? '') ?: ($rxOptions['ref'] ?? ''));
+        $existing = $paymentRef !== '' ? rxReservationByPaymentRef($paymentRef) : null;
+        if (is_array($existing)) {
+            return $this->rxRenewalReservationResult($existing);
+        }
         $isManual = $panel['type'] == "Manualsale";
+        $stored = (string) ($rxOptions['source'] ?? '') === 'payment' ? rxReservationStoredSelection($rxOptions['reservation'] ?? null) : null;
+        $selection = $stored !== null ? $stored : rxReservationPanelSelection($panel);
         if ($isManual) {
             $selection['policy'] = 'reset_all';
             $selection['reset_usage'] = false;
-            if (($selection['trigger'] ?? '') !== 'date') {
-                $selection['trigger'] = 'either';
-            }
         }
-        $allowedPolicies = ($isManual || (string) ($rxOptions['source'] ?? '') === 'payment') ? null : rxReservationPanelSettings($panel)['allowed_policies'];
-        if (!isset($selection['policy']) || !isset($selection['trigger'])) {
-            $selection = array_merge(rxReservationDefaultSelection($isManual ? null : $snapshot, rxReservationPanelSettings($panel)), array_filter($selection, function ($value) {
-                return $value !== null;
-            }));
-        }
-        $normalized = rxReservationNormalizeSelection($selection, $isManual ? null : $snapshot, time(), $allowedPolicies);
+        $normalized = rxReservationNormalizeSelection($selection, $isManual ? null : $snapshot, time(), $stored !== null);
         if (empty($normalized['ok'])) {
             return array(
                 'status' => false,
@@ -2456,10 +2456,11 @@ class ManagePanel
             'id_invoice' => $invoice['id_invoice'] ?? null,
             'bottype' => $invoice['bottype'] ?? null,
             'trigger' => $normalized['trigger'],
+            'conditions' => $normalized['conditions'],
             'trigger_at' => $normalized['trigger_at'],
             'policy' => $normalized['policy'],
             'reset_usage' => $normalized['reset_usage'],
-            'payment_ref' => (string) (($rxOptions['reservation']['payment_ref'] ?? '') ?: ($rxOptions['ref'] ?? '')),
+            'payment_ref' => $paymentRef,
             'fulfillment' => array(
                 'product_name' => (string) ($product['name_product'] ?? ($invoice['name_product'] ?? '')),
                 'inbounds' => $product['inbounds'] ?? null,
@@ -2475,17 +2476,35 @@ class ManagePanel
                 'msg' => (string) ($registered['msg'] ?? ($registered['code'] ?? 'reservation failed'))
             );
         }
+        $row = is_array($registered['row'] ?? null) ? $registered['row'] : rxReservationFetch((int) $registered['id']);
+        return $this->rxRenewalReservationResult(is_array($row) ? $row : array(
+            'id' => (int) $registered['id'],
+            'trigger_type' => $normalized['trigger'],
+            'conditions' => implode(',', $normalized['conditions']),
+            'trigger_at' => $normalized['trigger_at'],
+            'policy' => $normalized['policy'],
+            'reset_usage' => $normalized['reset_usage'] ? 1 : 0,
+        ));
+    }
+
+    private function rxRenewalReservationResult(array $row)
+    {
+        $conditions = rxReservationRowConditions($row);
+        $triggerAt = isset($row['trigger_at']) && $row['trigger_at'] !== null ? (int) $row['trigger_at'] : null;
+        $policy = (string) ($row['policy'] ?? 'reset_all');
         return array(
             'status' => true,
             'queued' => true,
-            'reservation_id' => (int) $registered['id'],
+            'reservation_id' => (int) $row['id'],
             'reservation' => array(
-                'trigger' => $normalized['trigger'],
-                'trigger_at' => $normalized['trigger_at'],
-                'policy' => $normalized['policy'],
-                'reset_usage' => $normalized['reset_usage'],
-                'trigger_label' => rxReservationTriggerLabel($normalized['trigger'], $normalized['trigger_at']),
-                'policy_label' => rxRenewalPolicyLabel($normalized['policy'], $normalized['reset_usage']),
+                'trigger' => (string) ($row['trigger_type'] ?? rxReservationTriggerForConditions($conditions)),
+                'conditions' => $conditions,
+                'trigger_at' => $triggerAt,
+                'policy' => $policy,
+                'reset_usage' => !empty($row['reset_usage']),
+                'trigger_label' => rxReservationActivationText($conditions, $triggerAt),
+                'policy_label' => isset(rxRenewalPolicies()[$policy]) ? rxRenewalPolicyLabel($policy, !empty($row['reset_usage'])) : $policy,
+                'confirmation' => rxReservationConfirmationText($conditions, $triggerAt),
             ),
         );
     }

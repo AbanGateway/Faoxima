@@ -57,12 +57,7 @@ final class ServiceRenewPreviewHandler extends BaseHandler
         $usableSnapshot = !empty($snapshot['ok']) && !empty($snapshot['exists']) ? $snapshot : null;
         $selection = null;
         if ($reservationUi) {
-            $input = FaoximaInput::array($this->data, 'reservation');
-            $reservationSettings = rxReservationPanelSettings($panel);
-            $selection = rxReservationSelectionFromData(['rsv' => !empty($input) ? $input : rxReservationDefaultSelection($usableSnapshot, $reservationSettings)], null, $reservationSettings);
-            if (($selection['trigger'] ?? '') === 'date') {
-                $selection['trigger_at'] = rxReservationParseDate((string)($input['trigger_at'] ?? ''), time());
-            }
+            $selection = rxReservationPanelSelection($panel);
         }
 
         $preview = rxRenewalPreviewForService($managePanel, $panel, (string)$invoice['username'], $volume, $days, [
@@ -74,33 +69,10 @@ final class ServiceRenewPreviewHandler extends BaseHandler
 
         $reservation = null;
         if ($reservationUi) {
-            $availability = rxReservationTriggerAvailability($usableSnapshot);
-            $triggers = [];
-            foreach (rxReservationSelectableTriggers() as $trigger) {
-                $triggers[] = [
-                    'key' => $trigger,
-                    'label' => rxRenewalText('trigger_' . $trigger),
-                    'available' => !empty($availability[$trigger]['available']),
-                    'reason' => (string)($availability[$trigger]['reason'] ?? ''),
-                ];
-            }
-            $policies = [];
-            foreach ($reservationSettings['allowed_policies'] as $policy) {
-                $policies[] = [
-                    'key' => $policy,
-                    'label' => rxRenewalPolicyLabel($policy),
-                    'short' => rxRenewalPolicyLabel($policy, false, true),
-                    'usage_reset_option' => rxRenewalPolicyAllowsUsageReset($policy),
-                ];
-            }
-            $check = rxReservationNormalizeSelection($selection, $usableSnapshot, time(), $reservationSettings['allowed_policies']);
+            $check = rxReservationNormalizeSelection($selection, $usableSnapshot, time());
             $reservation = [
-                'selection' => $selection,
-                'triggers' => $triggers,
-                'policies' => $policies,
                 'valid' => !empty($check['ok']),
                 'error' => empty($check['ok']) ? rxRenewalReasonText((string)$check['reason'], $check) : '',
-                'usage_note' => rxRenewalText('preview_usage_note'),
             ];
         }
 
@@ -109,7 +81,7 @@ final class ServiceRenewPreviewHandler extends BaseHandler
             'blocked'     => !empty($preview['blocked']) || ($reservation !== null && empty($reservation['valid'])),
             'mode'        => (string)($preview['mode'] ?? 'immediate'),
             'reason'      => (string)($preview['reason'] ?? ''),
-            'text'        => (string)($preview['text'] ?? '') . ($reservation !== null && empty($reservation['valid']) ? "\n" . $reservation['error'] : ''),
+            'text'        => $reservationUi && empty($preview['blocked']) ? '' : (string)($preview['text'] ?? ''),
             'reservation' => $reservation,
             'plan'        => $plan === null || empty($plan['ok']) ? null : [
                 'queued'             => !empty($plan['queued']),

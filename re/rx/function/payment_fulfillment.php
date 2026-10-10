@@ -927,10 +927,10 @@ if (!function_exists('rxRenewalTextDefaults')) {
             'policy_carry_traffic_reset_time' => 'حفظ حجم باقی‌مانده + افزودن حجم خریداری‌شده؛ زمان خریداری‌شده از لحظه اجرا شروع می‌شود',
             'policy_traffic_only' => 'فقط حجم: حجم باقی‌مانده + حجم خریداری‌شده؛ تاریخ انقضا تغییر نمی‌کند',
             'policy_time_only' => 'فقط زمان: زمان باقی‌مانده + زمان خریداری‌شده؛ حجم و مصرف تغییر نمی‌کند',
-            'policy_short_carry_all' => 'حفظ حجم و زمان باقی‌مانده + افزودن خرید',
+            'policy_short_carry_all' => 'حفظ حجم و زمان',
             'policy_short_reset_all' => 'ریست کامل حجم و زمان',
-            'policy_short_reset_traffic_append_time' => 'ریست حجم؛ حفظ زمان + افزودن زمان خرید',
-            'policy_short_carry_traffic_reset_time' => 'حفظ حجم + افزودن حجم خرید؛ ریست زمان',
+            'policy_short_reset_traffic_append_time' => 'ریست حجم، حفظ زمان',
+            'policy_short_carry_traffic_reset_time' => 'حفظ حجم، ریست زمان',
             'policy_short_traffic_only' => 'فقط افزایش حجم',
             'policy_short_time_only' => 'فقط افزایش زمان',
             'policy_usage_reset_suffix' => ' (شمارنده مصرف صفر می‌شود)',
@@ -942,7 +942,7 @@ if (!function_exists('rxRenewalTextDefaults')) {
             'trigger_immediate' => 'اجرای فوری (بدون رزرو)',
             'trigger_unavailable_traffic' => 'حجم این سرویس نامحدود است و هرگز تمام نمی‌شود.',
             'trigger_unavailable_expire' => 'زمان این سرویس نامحدود است و هرگز منقضی نمی‌شود.',
-            'trigger_unavailable_either' => 'حجم و زمان این سرویس هر دو نامحدود است؛ فقط فعال‌سازی در تاریخ مشخص یا اجرای فوری ممکن است.',
+            'trigger_unavailable_either' => 'حجم و زمان این سرویس هر دو نامحدود است؛ فقط فعال‌سازی در تاریخ مشخص ممکن است.',
             'reason_admin_blocked' => '⛔️ این سرویس توسط مدیریت غیرفعال شده است و تمدید، این محدودیت را برطرف نمی‌کند. برای رفع محدودیت با پشتیبانی در ارتباط باشید؛ مبلغی کسر نشد.',
             'reason_pending_unsupported' => '⚠️ این سرویس هنوز در انتظار اولین اتصال است و این پنل امکان اعمال روش تمدید انتخاب‌شده روی مدت انتظار را ندارد. لطفاً ابتدا به سرویس متصل شوید و سپس تمدید کنید؛ مبلغی کسر نشد.',
             'reason_result_not_usable' => '⚠️ با این روش، سرویس پس از اجرا همچنان قابل استفاده نخواهد بود ({detail}). روش یا محصول دیگری انتخاب کنید؛ مبلغی کسر نشد.',
@@ -992,33 +992,43 @@ if (!function_exists('rxRenewalTextDefaults')) {
             'reservation_note' => 'ℹ️ حجم و زمان باقی‌مانده در لحظه فعال‌سازی محاسبه می‌شود؛ مصرف شما تا آن لحظه از بسته رزرو کم نمی‌شود.',
             'reservation_estimate' => '🔎 برآورد در صورت فعال‌سازی در همین لحظه:',
             'reservation_estimate_unavailable' => 'ℹ️ برآورد لحظه‌ای در دسترس نیست؛ مقادیر در زمان فعال‌سازی محاسبه می‌شود.',
-            'reservation_settings_title' => '🗓 تنظیمات رزرو اشتراک',
-            'reservation_settings_hint' => 'از فهرست‌های زیر یک سیاست اجرا و یک زمان فعال‌سازی انتخاب کنید (گزینه انتخاب‌شده با ✅ مشخص است) و سپس فاکتور را تأیید نمایید.',
-            'section_policy' => '⚙️ سیاست اجرا (یک گزینه)',
-            'section_trigger' => '⏱ زمان فعال‌سازی (یک گزینه)',
             'mark_on' => '✅',
             'mark_off' => '⬜️',
-            'mark_unavailable' => '⛔️',
             'button_outdated' => '⚠️ این دکمه منقضی شده است؛ لطفاً مراحل تمدید را دوباره شروع کنید.',
-            'policy_not_allowed' => '❌ این سیاست برای این پنل مجاز نیست.',
             'admin_title' => '🗓 تنظیمات رزرو اشتراک پنل {panel}',
-            'admin_hint' => 'سیاست و زمان فعال‌سازی پیش‌فرض را انتخاب کنید و مشخص کنید مشتری از بین کدام سیاست‌ها می‌تواند انتخاب کند؛ سپس «ذخیره تنظیمات» را بزنید.',
-            'admin_section_default_policy' => '⚙️ سیاست پیش‌فرض (یک گزینه)',
-            'admin_section_default_trigger' => '⏱ زمان فعال‌سازی پیش‌فرض (یک گزینه)',
-            'admin_section_allowed' => '👥 سیاست‌های قابل انتخاب برای مشتری (چند گزینه)',
+            'admin_section_policy' => '⚙️ سیاست تمدید (یک گزینه)',
+            'admin_section_conditions' => '⏱ شرایط فعال‌سازی (چند گزینه؛ هرکدام زودتر)',
+            'admin_btn_date' => '📅 تغییر تاریخ',
+            'admin_summary' => '📌 تنظیم فعلی: {text}',
+            'admin_timezone_note' => '🕒 تاریخ‌ها به وقت {tz} ثبت و نمایش داده می‌شوند.',
+            'admin_conditions_empty' => '❌ حداقل یک شرط فعال‌سازی را انتخاب کنید.',
+            'admin_date_required' => '❌ برای شرط «تاریخ مشخص» ابتدا تاریخ را تعیین کنید.',
+            'admin_date_past' => '❌ تاریخ انتخاب‌شده گذشته است؛ یک تاریخ آینده تعیین کنید.',
+            'admin_date_invalid' => '❌ تاریخ نامعتبر است. تاریخ و ساعت را به شکل 1405/08/01 12:00 (شمسی) یا 2026-10-23 12:00 و حداکثر تا یک سال آینده ارسال کنید.',
+            'admin_date_prompt' => '📅 تاریخ و ساعت فعال‌سازی را به وقت {tz} ارسال کنید؛ مثال: 1405/08/01 12:00 (شمسی) یا 2026-10-23 12:00. ساعت اختیاری است (پیش‌فرض 00:00).',
+            'admin_date_saved' => '✅ تاریخ فعال‌سازی تعیین شد: {date}',
+            'cond_traffic' => 'اتمام حجم',
+            'cond_expire' => 'پایان زمان',
+            'cond_date' => 'تاریخ مشخص',
+            'cond_date_at' => 'تاریخ مشخص ({date})',
+            'activation_phrase_traffic' => 'پایان حجم',
+            'activation_phrase_expire' => 'پایان زمان',
+            'activation_phrase_traffic_expire' => 'پایان حجم یا زمان سرویس فعلی',
+            'activation_phrase_date' => 'رسیدن تاریخ {date}',
+            'activation_single_traffic' => 'پایان حجم سرویس فعلی',
+            'activation_single_expire' => 'پایان زمان سرویس فعلی',
+            'activation_single' => 'پس از {phrase} فعال می‌شود',
+            'activation_multi' => 'پس از {phrase}، هرکدام زودتر باشد، فعال می‌شود',
+            'activation_joiner' => ' یا ',
+            'reservation_confirmed' => '✅ اشتراک شما رزرو شد',
+            'reason_trigger_date_expired' => '❌ تاریخ فعال‌سازی رزرو که مدیریت تعیین کرده گذشته است و رزرو جدید با این تاریخ ثبت نمی‌شود؛ لطفاً با پشتیبانی در ارتباط باشید. مبلغی کسر نشد.',
+            'admin_hint' => 'یک سیاست تمدید و یک یا چند شرط فعال‌سازی انتخاب کنید؛ رزرو با برقراری هرکدام از شرط‌ها (هرکدام زودتر) فعال می‌شود. سپس «ذخیره تنظیمات» را بزنید. این تنظیمات برای همه رزروهای جدید این پنل اعمال می‌شود و مشتری آن را تغییر نمی‌دهد.',
             'admin_btn_save' => '💾 ذخیره تنظیمات',
             'admin_btn_back' => '🔙 بازگشت',
             'admin_saved' => '✅ روش تمدید «رزرو اشتراک» و تنظیمات آن ذخیره شد.',
             'admin_cancelled' => 'تنظیمات رزرو ذخیره نشد.',
-            'admin_allowed_empty' => '❌ حداقل یک سیاست باید برای مشتری مجاز باشد.',
-            'admin_default_not_allowed' => '❌ سیاست پیش‌فرض باید جزو سیاست‌های مجاز برای مشتری باشد.',
-            'admin_date_note' => 'ℹ️ اگر «در تاریخ مشخص» پیش‌فرض باشد، مشتری هنگام خرید تاریخ را وارد می‌کند. برای سرویس‌های نامحدود، گزینه‌های وابسته به اتمام حجم یا انقضا به مشتری غیرفعال نمایش داده می‌شوند.',
             'admin_pending_unsupported' => 'ℹ️ این نوع پنل تغییر مدت سرویس‌های «در انتظار اولین اتصال» را پشتیبانی نمی‌کند؛ رزرو چنین سرویسی با سیاست‌های دارای زمان تا اولین اتصال قابل اجرا نیست و به پشتیبانی ارجاع می‌شود.',
             'admin_outdated' => '⚠️ این دکمه منقضی شده است؛ لطفاً دوباره از منوی پنل وارد شوید.',
-            'reservation_btn_usage' => '{label} صفر کردن شمارنده مصرف (حجم باقی‌مانده حفظ می‌شود)',
-            'reservation_btn_date' => '📅 تعیین تاریخ فعال‌سازی',
-            'reservation_date_prompt' => '📅 تعداد روز تا فعال‌سازی (مثلاً 10) یا تاریخ شمسی به شکل 1405/08/01 را ارسال کنید.',
-            'reservation_date_saved' => '✅ تاریخ فعال‌سازی ثبت شد: {date}',
             'reservation_date_unset' => 'تعیین نشده',
             'status_pending' => 'در انتظار فعال‌سازی',
             'status_processing' => 'در حال اجرا',
@@ -1030,7 +1040,6 @@ if (!function_exists('rxRenewalTextDefaults')) {
             'reservation_notice' => '📌 رزرو اشتراک: {status}\n⏱ زمان فعال‌سازی: {trigger}\n⚙️ سیاست اجرا: {policy}',
             'reservation_failed_user_tpl' => "⚠️ فعال‌سازی رزرو اشتراک سرویس {username} با مشکل مواجه شد و برای بررسی به پشتیبانی ارسال شد. بسته رزرو شما محفوظ است.",
             'reconciled_user_tpl' => '✅ تمدید سرویس {username} در پنل تأیید و اعمال شد.',
-            'reservation_registered_tpl' => "✅ رزرو اشتراک ثبت شد.\n⏱ زمان فعال‌سازی: {trigger}\n⚙️ سیاست اجرا: {policy}",
             'result_line_expire' => '⏳ انقضا : {before} ← {after}',
             'result_line_limit' => '📦 حجم کل : {before} ← {after}',
             'result_line_remaining' => '🔋 حجم باقی‌مانده : {before} ← {after}',
@@ -1660,6 +1669,8 @@ if (!function_exists('rxRenewalReasonText')) {
                 return rxRenewalText('reason_trigger_date_required');
             case 'trigger_date_invalid':
                 return rxRenewalText('reason_trigger_date_invalid');
+            case 'trigger_date_expired':
+                return rxRenewalText('reason_trigger_date_expired');
             case 'policy_invalid':
                 return rxRenewalText('reason_policy_invalid');
             case 'reservation_unsupported':
@@ -1673,7 +1684,7 @@ if (!function_exists('rxRenewalFailureKnown')) {
     function rxRenewalFailureKnown($extend): bool
     {
         $code = is_array($extend) ? (string) ($extend['code'] ?? '') : '';
-        return in_array($code, ['admin_blocked', 'pending_unsupported', 'result_not_usable', 'invalid_purchase', 'unknown_renewal_method', 'unsupported_renewal_method', 'unknown_policy', 'panel_state_unavailable', 'panel_read_failed', 'user_missing', 'renewal_in_progress', 'queued_renewal_exists', 'trigger_unavailable', 'trigger_date_required', 'trigger_date_invalid', 'policy_invalid', 'reservation_unsupported'], true);
+        return in_array($code, ['admin_blocked', 'pending_unsupported', 'result_not_usable', 'invalid_purchase', 'unknown_renewal_method', 'unsupported_renewal_method', 'unknown_policy', 'panel_state_unavailable', 'panel_read_failed', 'user_missing', 'renewal_in_progress', 'queued_renewal_exists', 'trigger_unavailable', 'trigger_date_required', 'trigger_date_invalid', 'trigger_date_expired', 'policy_invalid', 'reservation_unsupported'], true);
     }
 }
 

@@ -3692,6 +3692,9 @@ $textonebuy
             $DataUserOut = $ManagePanel->DataUser($nameloc['Service_location'], $nameloc['username']);
             $Balance_Low_user = 0;
             $rxRenewMode = rxRenewalMode($marzban_list_get['Methodextend'] ?? '');
+            if (rxReservationStoredSelection($rxReservationSel) !== null) {
+                $rxRenewMode = rxRenewalMode('رزرو اشتراک');
+            }
             $rxQueuedRenewal = is_array($rxRenewMode) && !empty($rxRenewMode['queued']) && (string) ($rxReservationSel['trigger'] ?? '') !== 'immediate';
             $rxPolicy = is_array($rxRenewMode) ? (string) ($rxRenewMode['policy'] ?? '') : '';
             $rxResetUsage = is_array($rxRenewMode) && !empty($rxRenewMode['reset_usage']);
@@ -3900,16 +3903,13 @@ $textonebuy
         }
         $priceproductformat = number_format($prodcut['price_product']);
         if (!empty($extend['queued'])) {
-            $rxQueuedSuccessTpl = $datatextbot['dyn_renewconfirm_queued_success'] ?? '✅ سرویس خریداری شده رزرو شد و به محض پایان سرویس فعلی فعال می‌گردد.';
+            $rxQueuedSuccessTpl = (string) ($extend['reservation']['confirmation'] ?? rxRenewalText('reservation_confirmed'));
             $textextend = "$rxQueuedSuccessTpl
 
 ▫️نام سرویس : $usernamepanel
 ▫️نام محصول : {$prodcut['name_product']}
 ▫️مبلغ تمدید $priceproductformat تومان
 ";
-            if (is_array($extend['reservation'] ?? null)) {
-                $textextend .= "\n" . rxRenewalText('reservation_trigger', ['label' => (string) $extend['reservation']['trigger_label']]) . "\n" . rxRenewalText('reservation_policy', ['label' => (string) $extend['reservation']['policy_label']]);
-            }
         } else {
             $textextend = "✅ تمدید برای سرویس شما با موفقیت صورت گرفت
 

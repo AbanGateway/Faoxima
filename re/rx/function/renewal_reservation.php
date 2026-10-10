@@ -31,6 +31,7 @@ if (!function_exists('rx_rn_queued_columns')) {
             'service_key' => 'VARCHAR(191) NULL',
             'active_key' => 'VARCHAR(191) NULL',
             'trigger_type' => "VARCHAR(20) NOT NULL DEFAULT 'either'",
+            'conditions' => 'VARCHAR(64) NULL',
             'trigger_at' => 'INT UNSIGNED NULL',
             'policy' => "VARCHAR(40) NOT NULL DEFAULT 'reset_all'",
             'reset_usage' => 'TINYINT(1) NOT NULL DEFAULT 0',
@@ -132,6 +133,13 @@ if (!function_exists('rx_rn_ensure_schema')) {
                 $settingsColumn = $pdo->query("SHOW COLUMNS FROM marzban_panel LIKE 'reservation_settings'");
                 if ($settingsColumn !== false && $settingsColumn->fetch(PDO::FETCH_ASSOC) === false) {
                     $pdo->exec("ALTER TABLE marzban_panel ADD COLUMN reservation_settings TEXT NULL");
+                }
+                $legacySettings = $pdo->query("SELECT code_panel, reservation_settings FROM marzban_panel WHERE reservation_settings LIKE '%default_policy%' OR reservation_settings LIKE '%default_trigger%'");
+                if ($legacySettings !== false) {
+                    $migrateSettings = $pdo->prepare("UPDATE marzban_panel SET reservation_settings = ? WHERE code_panel = ?");
+                    foreach ($legacySettings->fetchAll(PDO::FETCH_ASSOC) as $legacyRow) {
+                        $migrateSettings->execute([rxReservationSettingsJson(rxReservationSettingsFromRaw(json_decode((string) $legacyRow['reservation_settings'], true))), (string) $legacyRow['code_panel']]);
+                    }
                 }
             }
             $exists = $pdo->query("SHOW TABLES LIKE 'queued_renewal'");
@@ -315,17 +323,109 @@ if (!function_exists('rx_rn_op_update')) {
 if (!function_exists('rxReservationTriggers')) {
     function rxReservationTriggers(): array
     {
-        return ['either', 'traffic', 'expire', 'date', 'immediate'];
+        return ['either', 'traffic', 'expire', 'date', 'immediate', 'multi'];
+    }
+}
+
+if (!function_exists('rxReservationConditions')) {
+    function rxReservationConditions(): array
+    {
+        return ['traffic', 'expire', 'date'];
+    }
+}
+
+if (!function_exists('rxReservationConditionsFromTrigger')) {
+    function rxReservationConditionsFromTrigger(string $trigger): array
+    {
+        if ($trigger === 'traffic' || $trigger === 'expire' || $trigger === 'date') {
+            return [$trigger];
+        }
+        if ($trigger === 'immediate') {
+            return [];
+        }
+        return ['traffic', 'expire'];
+    }
+}
+
+if (!function_exists('rxReservationNormalizeConditions')) {
+    function rxReservationNormalizeConditions($conditions): array
+    {
+        if (is_string($conditions)) {
+            $conditions = explode(',', $conditions);
+        }
+        $conditions = is_array($conditions) ? array_map('strval', $conditions) : [];
+        return array_values(array_intersect(rxReservationConditions(), $conditions));
+    }
+}
+
+if (!function_exists('rxReservationTriggerForConditions')) {
+    function rxReservationTriggerForConditions(array $conditions): string
+    {
+        $conditions = rxReservationNormalizeConditions($conditions);
+        if ($conditions === ['traffic', 'expire']) {
+            return 'either';
+        }
+        return count($conditions) === 1 ? $conditions[0] : 'multi';
+    }
+}
+
+if (!function_exists('rxReservationRowConditions')) {
+    function rxReservationRowConditions(array $row): array
+    {
+        $stored = rxReservationNormalizeConditions((string) ($row['conditions'] ?? ''));
+        if ($stored !== []) {
+            return $stored;
+        }
+        return rxReservationConditionsFromTrigger((string) ($row['trigger_type'] ?? 'either'));
+    }
+}
+
+if (!function_exists('rxReservationActivationText')) {
+    function rxReservationActivationText(array $conditions, $triggerAt = null): string
+    {
+        $conditions = rxReservationNormalizeConditions($conditions);
+        $date = is_numeric($triggerAt) && (int) $triggerAt > 0 ? rxRenewalFormatExpire((int) $triggerAt) : rxRenewalText('reservation_date_unset');
+        if (count($conditions) === 1) {
+            $phrase = $conditions[0] === 'date'
+                ? rxRenewalText('activation_phrase_date', ['date' => $date])
+                : rxRenewalText('activation_single_' . $conditions[0]);
+            return rxRenewalText('activation_single', ['phrase' => $phrase]);
+        }
+        $parts = [];
+        if (in_array('traffic', $conditions, true) && in_array('expire', $conditions, true)) {
+            $parts[] = rxRenewalText('activation_phrase_traffic_expire');
+        } else {
+            foreach (['traffic', 'expire'] as $key) {
+                if (in_array($key, $conditions, true)) {
+                    $parts[] = rxRenewalText('activation_phrase_' . $key);
+                }
+            }
+        }
+        if (in_array('date', $conditions, true)) {
+            $parts[] = rxRenewalText('activation_phrase_date', ['date' => $date]);
+        }
+        return rxRenewalText('activation_multi', ['phrase' => implode(rxRenewalText('activation_joiner'), $parts)]);
+    }
+}
+
+if (!function_exists('rxReservationConfirmationText')) {
+    function rxReservationConfirmationText(array $conditions, $triggerAt = null): string
+    {
+        return rxRenewalText('reservation_confirmed') . "\n" . rxReservationActivationText($conditions, $triggerAt);
     }
 }
 
 if (!function_exists('rxReservationTriggerLabel')) {
-    function rxReservationTriggerLabel(string $trigger, $triggerAt = null): string
+    function rxReservationTriggerLabel(string $trigger, $triggerAt = null, $conditions = null): string
     {
-        if ($trigger === 'date' && is_numeric($triggerAt) && (int) $triggerAt > 0) {
-            return rxRenewalText('trigger_date_at', ['date' => rxRenewalFormatExpire((int) $triggerAt)]);
+        $list = rxReservationNormalizeConditions($conditions ?? '');
+        if ($list === []) {
+            $list = rxReservationConditionsFromTrigger($trigger);
         }
-        return rxRenewalText('trigger_' . (in_array($trigger, rxReservationTriggers(), true) ? $trigger : 'either'));
+        if ($list === []) {
+            return rxRenewalText('trigger_immediate');
+        }
+        return rxReservationActivationText($list, $triggerAt);
     }
 }
 
@@ -341,7 +441,7 @@ if (!function_exists('rxReservationTriggerAvailability')) {
     function rxReservationTriggerAvailability(?array $snapshot): array
     {
         $out = [];
-        foreach (rxReservationTriggers() as $trigger) {
+        foreach (array_merge(rxReservationTriggers(), rxReservationConditions()) as $trigger) {
             $out[$trigger] = ['available' => true, 'reason' => ''];
         }
         if (!is_array($snapshot) || empty($snapshot['ok']) || empty($snapshot['exists'])) {
@@ -368,36 +468,37 @@ if (!function_exists('rxReservationTriggered')) {
         if (empty($snapshot['ok']) || empty($snapshot['exists'])) {
             return false;
         }
-        $trigger = (string) ($row['trigger_type'] ?? 'either');
-        if ($trigger === 'date') {
+        $conditions = rxReservationRowConditions($row);
+        if (in_array('date', $conditions, true)) {
             $at = (int) ($row['trigger_at'] ?? 0);
-            return $at > 0 && $now >= $at;
+            if ($at > 0 && $now >= $at) {
+                return true;
+            }
         }
         $status = strtolower((string) ($snapshot['status'] ?? ''));
         $limit = rx_pf_int($snapshot['data_limit'] ?? 0);
         $used = rx_pf_int($snapshot['used_traffic'] ?? 0);
         $expire = rx_pf_int($snapshot['expire'] ?? 0);
         $pending = !empty($snapshot['pending']);
-        $trafficExhausted = $limit > 0 && ($used >= $limit || $status === 'limited');
-        $expired = !$pending && $expire > 0 && ($expire <= $now || $status === 'expired');
-        if ($trigger === 'traffic') {
-            return $trafficExhausted;
+        if (in_array('traffic', $conditions, true) && $limit > 0 && ($used >= $limit || $status === 'limited')) {
+            return true;
         }
-        if ($trigger === 'expire') {
-            return $expired;
+        if (in_array('expire', $conditions, true) && !$pending && $expire > 0 && ($expire <= $now || $status === 'expired')) {
+            return true;
         }
-        return $trafficExhausted || $expired;
+        return false;
     }
 }
 
 if (!function_exists('rxReservationParseDate')) {
-    function rxReservationParseDate($input, int $now): ?int
+    function rxReservationParseDate($input, int $now, int $maxAhead = 31622400): ?int
     {
         $input = trim((string) $input);
         if (function_exists('convertPersianNumbersToEnglish')) {
             $input = (string) convertPersianNumbersToEnglish($input);
         }
-        $input = strtr($input, ['۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4', '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9']);
+        $input = strtr($input, ['۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4', '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9', '：' => ':']);
+        $input = preg_replace('/\s+/', ' ', $input);
         if ($input === '') {
             return null;
         }
@@ -410,10 +511,15 @@ if (!function_exists('rxReservationParseDate')) {
         }
         if (ctype_digit($input) && (int) $input > 1000000000) {
             $ts = (int) $input;
-        } elseif (preg_match('/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/', $input, $m)) {
+        } elseif (preg_match('/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:[ T](\d{1,2}):(\d{2}))?$/', $input, $m)) {
             $y = (int) $m[1];
             $mo = (int) $m[2];
             $d = (int) $m[3];
+            $h = isset($m[4]) && $m[4] !== '' ? (int) $m[4] : 0;
+            $mi = isset($m[5]) && $m[5] !== '' ? (int) $m[5] : 0;
+            if ($h > 23 || $mi > 59) {
+                return null;
+            }
             if ($y < 1700) {
                 if (!function_exists('jalali_to_gregorian')) {
                     return null;
@@ -427,11 +533,11 @@ if (!function_exists('rxReservationParseDate')) {
             if (!checkdate($mo, $d, $y)) {
                 return null;
             }
-            $ts = mktime(0, 0, 0, $mo, $d, $y);
+            $ts = mktime($h, $mi, 0, $mo, $d, $y);
         } else {
             return null;
         }
-        if ($ts === false || $ts <= $now || $ts > $now + 366 * 86400) {
+        if ($ts === false || $ts <= $now || $ts > $now + $maxAhead) {
             return null;
         }
         return (int) $ts;
@@ -439,37 +545,59 @@ if (!function_exists('rxReservationParseDate')) {
 }
 
 if (!function_exists('rxReservationNormalizeSelection')) {
-    function rxReservationNormalizeSelection($selection, ?array $snapshot, int $now, ?array $allowedPolicies = null): array
+    function rxReservationNormalizeSelection($selection, ?array $snapshot, int $now, bool $allowElapsedDate = false): array
     {
         $selection = is_array($selection) ? $selection : [];
-        $trigger = (string) ($selection['trigger'] ?? 'either');
-        if (!in_array($trigger, rxReservationTriggers(), true)) {
-            return ['ok' => false, 'reason' => 'trigger_unavailable', 'detail' => $trigger];
-        }
         $policy = (string) ($selection['policy'] ?? 'reset_all');
         if (!isset(rxRenewalPolicies()[$policy])) {
             return ['ok' => false, 'reason' => 'policy_invalid'];
         }
-        if ($allowedPolicies !== null && !in_array($policy, $allowedPolicies, true)) {
-            return ['ok' => false, 'reason' => 'policy_invalid'];
+        $conditions = rxReservationNormalizeConditions($selection['conditions'] ?? []);
+        if ($conditions === [] && isset($selection['trigger'])) {
+            if ((string) $selection['trigger'] === 'immediate') {
+                return ['ok' => true, 'trigger' => 'immediate', 'conditions' => [], 'trigger_at' => null, 'policy' => $policy, 'reset_usage' => !empty($selection['reset_usage']) && rxRenewalPolicyAllowsUsageReset($policy)];
+            }
+            $conditions = rxReservationConditionsFromTrigger((string) $selection['trigger']);
         }
-        $resetUsage = !empty($selection['reset_usage']) && rxRenewalPolicyAllowsUsageReset($policy);
-        $availability = rxReservationTriggerAvailability($snapshot);
-        if (empty($availability[$trigger]['available'])) {
-            return ['ok' => false, 'reason' => 'trigger_unavailable', 'detail' => (string) $availability[$trigger]['reason']];
+        if ($conditions === []) {
+            return ['ok' => false, 'reason' => 'trigger_unavailable', 'detail' => rxRenewalText('admin_conditions_empty')];
         }
         $triggerAt = null;
-        if ($trigger === 'date') {
+        if (in_array('date', $conditions, true)) {
             $raw = $selection['trigger_at'] ?? null;
-            if ($raw === null || $raw === '' || $raw === 0) {
+            if ($raw === null || $raw === '' || (int) $raw <= 0) {
                 return ['ok' => false, 'reason' => 'trigger_date_required'];
             }
-            $triggerAt = rxReservationParseDate($raw, $now);
+            $triggerAt = is_numeric($raw) ? (int) $raw : rxReservationParseDate($raw, $now);
             if ($triggerAt === null) {
                 return ['ok' => false, 'reason' => 'trigger_date_invalid'];
             }
+            if ($triggerAt <= $now && !$allowElapsedDate) {
+                return ['ok' => false, 'reason' => 'trigger_date_expired', 'trigger_at' => $triggerAt];
+            }
+        } else {
+            $availability = rxReservationTriggerAvailability($snapshot);
+            $possible = false;
+            $reasons = [];
+            foreach ($conditions as $condition) {
+                if (!empty($availability[$condition]['available'])) {
+                    $possible = true;
+                } else {
+                    $reasons[] = (string) $availability[$condition]['reason'];
+                }
+            }
+            if (!$possible) {
+                return ['ok' => false, 'reason' => 'trigger_unavailable', 'detail' => implode(' ', $reasons)];
+            }
         }
-        return ['ok' => true, 'trigger' => $trigger, 'trigger_at' => $triggerAt, 'policy' => $policy, 'reset_usage' => $resetUsage];
+        return [
+            'ok' => true,
+            'trigger' => rxReservationTriggerForConditions($conditions),
+            'conditions' => $conditions,
+            'trigger_at' => $triggerAt,
+            'policy' => $policy,
+            'reset_usage' => !empty($selection['reset_usage']) && rxRenewalPolicyAllowsUsageReset($policy),
+        ];
     }
 }
 
@@ -492,6 +620,24 @@ if (!function_exists('rxReservationOutstanding')) {
             return $row === false ? null : $row;
         } catch (Throwable $e) {
             rx_pf_log('RESERVATION_LOOKUP_FAILED', $e->getMessage(), ['service_key' => $serviceKey]);
+            return null;
+        }
+    }
+}
+
+if (!function_exists('rxReservationByPaymentRef')) {
+    function rxReservationByPaymentRef(string $paymentRef): ?array
+    {
+        global $pdo;
+        if ($paymentRef === '' || !($pdo instanceof PDO) || !rx_rn_ensure_schema()) {
+            return null;
+        }
+        try {
+            $stmt = $pdo->prepare("SELECT * FROM queued_renewal WHERE payment_ref = ? LIMIT 1");
+            $stmt->execute([$paymentRef]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            return $row === false ? null : $row;
+        } catch (Throwable $e) {
             return null;
         }
     }
@@ -523,13 +669,15 @@ if (!function_exists('rxReservationSummaryForService')) {
         $trigger = (string) ($row['trigger_type'] ?? 'either');
         $policy = (string) ($row['policy'] ?? 'reset_all');
         $resetUsage = !empty($row['reset_usage']);
+        $conditions = rxReservationRowConditions($row);
         return [
             'id' => (int) $row['id'],
             'status' => $status,
             'status_label' => rxReservationStatusLabel($status),
             'trigger' => $trigger,
+            'conditions' => $conditions,
             'trigger_at' => isset($row['trigger_at']) && $row['trigger_at'] !== null ? (int) $row['trigger_at'] : null,
-            'trigger_label' => rxReservationTriggerLabel($trigger, $row['trigger_at'] ?? null),
+            'trigger_label' => rxReservationTriggerLabel($trigger, $row['trigger_at'] ?? null, $conditions),
             'policy' => $policy,
             'policy_label' => isset(rxRenewalPolicies()[$policy]) ? rxRenewalPolicyLabel($policy, $resetUsage) : $policy,
             'reset_usage' => $resetUsage,
@@ -538,7 +686,7 @@ if (!function_exists('rxReservationSummaryForService')) {
             'created_at' => (string) ($row['created_at'] ?? ''),
             'text' => rxRenewalText('reservation_notice', [
                 'status' => rxReservationStatusLabel($status),
-                'trigger' => rxReservationTriggerLabel($trigger, $row['trigger_at'] ?? null),
+                'trigger' => rxReservationTriggerLabel($trigger, $row['trigger_at'] ?? null, $conditions),
                 'policy' => isset(rxRenewalPolicies()[$policy]) ? rxRenewalPolicyLabel($policy, $resetUsage) : $policy,
             ]),
         ];
@@ -573,8 +721,8 @@ if (!function_exists('rxReservationRegister')) {
             $now = time();
             $stmt = $pdo->prepare(
                 "INSERT INTO queued_renewal (id_user, username, name_panel, code_panel, code_product, new_limit_gb, time_day, price, id_invoice, status, bottype, created_at, "
-                . "service_key, active_key, trigger_type, trigger_at, policy, reset_usage, payment_ref, fulfillment, attempt_count, legacy, updated_at) "
-                . "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)"
+                . "service_key, active_key, trigger_type, conditions, trigger_at, policy, reset_usage, payment_ref, fulfillment, attempt_count, legacy, updated_at) "
+                . "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)"
             );
             $stmt->execute([
                 (string) ($a['id_user'] ?? ''),
@@ -591,6 +739,7 @@ if (!function_exists('rxReservationRegister')) {
                 $serviceKey,
                 $serviceKey,
                 (string) $a['trigger'],
+                implode(',', rxReservationNormalizeConditions($a['conditions'] ?? rxReservationConditionsFromTrigger((string) $a['trigger']))),
                 $a['trigger_at'] ?? null,
                 (string) $a['policy'],
                 !empty($a['reset_usage']) ? 1 : 0,
@@ -605,6 +754,8 @@ if (!function_exists('rxReservationRegister')) {
                 'username' => (string) $a['username'],
                 'panel' => (string) $a['name_panel'],
                 'trigger' => (string) $a['trigger'],
+                'conditions' => rxReservationNormalizeConditions($a['conditions'] ?? []),
+                'trigger_at' => $a['trigger_at'] ?? null,
                 'policy' => (string) $a['policy'],
                 'payment_ref' => $paymentRef,
             ]);
@@ -626,18 +777,9 @@ if (!function_exists('rxReservationPreview')) {
     function rxReservationPreview($panel, string $username, ?array $snapshot, $volumeGb, $days, array $opts = []): array
     {
         $now = time();
-        $selection = is_array($opts['reservation'] ?? null) ? $opts['reservation'] : [];
-        $availability = rxReservationTriggerAvailability($snapshot);
-        $panelDefaults = rxReservationDefaultSelection($snapshot, rxReservationPanelSettings($panel));
-        if (!isset($selection['trigger'])) {
-            $selection['trigger'] = $panelDefaults['trigger'];
-        }
-        if (!isset($selection['policy'])) {
-            $selection['policy'] = $panelDefaults['policy'];
-        }
+        $selection = rxReservationPanelSelection($panel);
         $base = [
             'mode' => 'reservation',
-            'availability' => $availability,
             'selection' => $selection,
             'plan' => null,
         ];
@@ -646,42 +788,37 @@ if (!function_exists('rxReservationPreview')) {
             return array_merge($base, ['ok' => false, 'blocked' => true, 'reason' => 'admin_blocked', 'text' => rxRenewalReasonText('admin_blocked')]);
         }
         $serviceKey = rx_rn_service_key((string) ($opts['id_invoice'] ?? rxRenewalInvoiceId($username, (string) ($panel['name_panel'] ?? ''))), (string) ($panel['code_panel'] ?? ''), $username);
-        if ((string) $selection['trigger'] !== 'immediate' && rxReservationOutstanding($serviceKey, $username, (string) ($panel['name_panel'] ?? '')) !== null) {
+        if (rxReservationOutstanding($serviceKey, $username, (string) ($panel['name_panel'] ?? '')) !== null) {
             return array_merge($base, ['ok' => false, 'blocked' => true, 'reason' => 'queued_renewal_exists', 'text' => rxRenewalReasonText('queued_renewal_exists')]);
         }
-        $policy = isset(rxRenewalPolicies()[(string) $selection['policy']]) ? (string) $selection['policy'] : 'reset_all';
-        $resetUsage = !empty($selection['reset_usage']) && rxRenewalPolicyAllowsUsageReset($policy);
-        $plan = $snapshot !== null ? rxRenewalPlanForSnapshot($snapshot, $panel, $username, $policy, $resetUsage, $volumeGb, $days, 'رزرو اشتراک', $now) : null;
-        if ((string) $selection['trigger'] === 'immediate') {
-            if ($plan === null) {
-                return array_merge($base, ['ok' => false, 'blocked' => false, 'reason' => 'panel_unreachable', 'text' => rxRenewalText('reason_panel_unreachable')]);
-            }
-            return array_merge($base, ['ok' => !empty($plan['ok']), 'blocked' => empty($plan['ok']), 'plan' => $plan, 'reason' => (string) ($plan['reason'] ?? ''), 'text' => rxRenewalPreviewText($plan)]);
+        $check = rxReservationNormalizeSelection($selection, $snapshot, $now);
+        if (empty($check['ok'])) {
+            return array_merge($base, ['ok' => false, 'blocked' => true, 'reason' => (string) $check['reason'], 'text' => rxRenewalReasonText((string) $check['reason'], $check)]);
+        }
+        $policy = (string) $check['policy'];
+        $plan = $snapshot !== null ? rxRenewalPlanForSnapshot($snapshot, $panel, $username, $policy, false, $volumeGb, $days, 'رزرو اشتراک', $now) : null;
+        if (is_array($plan) && in_array((string) ($plan['reason'] ?? ''), ['pending_unsupported', 'invalid_purchase'], true)) {
+            return array_merge($base, ['ok' => false, 'blocked' => true, 'plan' => null, 'reason' => (string) $plan['reason'], 'text' => rxRenewalReasonText((string) $plan['reason'], $plan)]);
         }
         $lines = [
             rxRenewalText('reservation_title'),
-            rxRenewalText('reservation_trigger', ['label' => rxReservationTriggerLabel((string) $selection['trigger'], (string) $selection['trigger'] === 'date' ? rxReservationParseDate($selection['trigger_at'] ?? '', $now) : null)]),
-            rxRenewalText('reservation_policy', ['label' => rxRenewalPolicyLabel($policy, $resetUsage)]),
+            rxRenewalText('reservation_trigger', ['label' => rxReservationActivationText($check['conditions'], $check['trigger_at'])]),
+            rxRenewalText('reservation_policy', ['label' => rxRenewalPolicyLabel($policy)]),
             rxRenewalText('reservation_note'),
         ];
-        if (empty($availability[(string) $selection['trigger']]['available'])) {
-            $lines[] = rxRenewalReasonText('trigger_unavailable', ['detail' => (string) $availability[(string) $selection['trigger']]['reason']]);
-        }
         if (is_array($plan) && !empty($plan['ok'])) {
             $lines[] = '';
             $lines[] = rxRenewalText('reservation_estimate');
             $lines = array_merge($lines, rxRenewalPlanLines($plan));
-        } elseif (is_array($plan) && in_array((string) ($plan['reason'] ?? ''), ['pending_unsupported', 'invalid_purchase'], true)) {
-            $lines[] = rxRenewalReasonText((string) $plan['reason'], $plan);
         } else {
             $lines[] = rxRenewalText('reservation_estimate_unavailable');
         }
-        $hardInvalid = is_array($plan) && (string) ($plan['reason'] ?? '') === 'invalid_purchase';
         return array_merge($base, [
-            'ok' => !$hardInvalid,
-            'blocked' => $hardInvalid,
+            'ok' => true,
+            'blocked' => false,
+            'selection' => $check,
             'plan' => is_array($plan) && !empty($plan['ok']) ? $plan : null,
-            'reason' => $hardInvalid ? 'invalid_purchase' : '',
+            'reason' => '',
             'text' => implode("\n", $lines),
         ]);
     }
@@ -1133,121 +1270,80 @@ if (!function_exists('rxRenewalOpReconcileOne')) {
     }
 }
 
-if (!function_exists('rxReservationSelectableTriggers')) {
-    function rxReservationSelectableTriggers(): array
+if (!function_exists('rxReservationAdminPolicies')) {
+    function rxReservationAdminPolicies(): array
     {
-        return ['either', 'traffic', 'expire', 'date'];
+        return ['carry_all', 'reset_all', 'reset_traffic_append_time', 'carry_traffic_reset_time'];
+    }
+}
+
+if (!function_exists('rxReservationSettingsFromRaw')) {
+    function rxReservationSettingsFromRaw($raw): array
+    {
+        $raw = is_array($raw) ? $raw : [];
+        $configured = isset($raw['policy']) || isset($raw['conditions']) || isset($raw['default_policy']) || isset($raw['default_trigger']);
+        $policy = (string) ($raw['policy'] ?? ($raw['default_policy'] ?? ''));
+        if (!in_array($policy, rxReservationAdminPolicies(), true)) {
+            $policy = 'reset_all';
+        }
+        if (isset($raw['conditions'])) {
+            $conditions = rxReservationNormalizeConditions($raw['conditions']);
+        } else {
+            $conditions = rxReservationConditionsFromTrigger((string) ($raw['default_trigger'] ?? 'either'));
+        }
+        $dateAt = isset($raw['date_at']) && is_numeric($raw['date_at']) && (int) $raw['date_at'] > 0 ? (int) $raw['date_at'] : null;
+        if ($dateAt === null) {
+            $conditions = array_values(array_diff($conditions, ['date']));
+        }
+        if ($conditions === []) {
+            $conditions = ['traffic', 'expire'];
+        }
+        return ['policy' => $policy, 'conditions' => $conditions, 'date_at' => in_array('date', $conditions, true) ? $dateAt : null, 'configured' => $configured];
     }
 }
 
 if (!function_exists('rxReservationPanelSettings')) {
     function rxReservationPanelSettings($panel): array
     {
-        $policies = array_keys(rxRenewalPolicies());
         $raw = is_array($panel) ? json_decode((string) ($panel['reservation_settings'] ?? ''), true) : null;
-        $raw = is_array($raw) ? $raw : [];
-        $allowed = is_array($raw['allowed_policies'] ?? null) ? array_values(array_intersect($policies, $raw['allowed_policies'])) : $policies;
-        if ($allowed === []) {
-            $allowed = $policies;
-        }
-        $defaultPolicy = (string) ($raw['default_policy'] ?? '');
-        if (!in_array($defaultPolicy, $allowed, true)) {
-            $defaultPolicy = in_array('reset_all', $allowed, true) ? 'reset_all' : $allowed[0];
-        }
-        $defaultTrigger = (string) ($raw['default_trigger'] ?? '');
-        if (!in_array($defaultTrigger, rxReservationSelectableTriggers(), true)) {
-            $defaultTrigger = 'either';
-        }
-        return ['default_policy' => $defaultPolicy, 'default_trigger' => $defaultTrigger, 'allowed_policies' => $allowed];
+        return rxReservationSettingsFromRaw($raw);
     }
 }
 
-if (!function_exists('rxReservationDefaultSelection')) {
-    function rxReservationDefaultSelection(?array $snapshot, ?array $settings = null): array
+if (!function_exists('rxReservationSettingsJson')) {
+    function rxReservationSettingsJson(array $settings): string
     {
-        $settings = $settings ?? rxReservationPanelSettings(null);
-        $availability = rxReservationTriggerAvailability($snapshot);
-        $trigger = (string) $settings['default_trigger'];
-        if (empty($availability[$trigger]['available'])) {
-            $trigger = 'date';
-            foreach (['either', 'traffic', 'expire'] as $candidate) {
-                if (!empty($availability[$candidate]['available'])) {
-                    $trigger = $candidate;
-                    break;
-                }
-            }
-        }
-        return ['trigger' => $trigger, 'trigger_at' => null, 'policy' => (string) $settings['default_policy'], 'reset_usage' => false];
+        return (string) json_encode([
+            'policy' => (string) $settings['policy'],
+            'conditions' => rxReservationNormalizeConditions($settings['conditions']),
+            'date_at' => in_array('date', rxReservationNormalizeConditions($settings['conditions']), true) ? (int) $settings['date_at'] : null,
+        ], JSON_UNESCAPED_UNICODE);
     }
 }
 
-if (!function_exists('rxReservationSelectionFromData')) {
-    function rxReservationSelectionFromData($data, ?array $snapshot = null, ?array $settings = null): array
+if (!function_exists('rxReservationPanelSelection')) {
+    function rxReservationPanelSelection($panel): array
     {
-        $settings = $settings ?? rxReservationPanelSettings(null);
-        $sel = is_array($data) && is_array($data['rsv'] ?? null) ? $data['rsv'] : rxReservationDefaultSelection($snapshot, $settings);
-        $policy = (string) ($sel['policy'] ?? '');
-        if (!in_array($policy, $settings['allowed_policies'], true)) {
-            $policy = (string) $settings['default_policy'];
-        }
-        $trigger = in_array((string) ($sel['trigger'] ?? ''), rxReservationTriggers(), true) ? (string) $sel['trigger'] : (string) $settings['default_trigger'];
+        $settings = rxReservationPanelSettings($panel);
         return [
-            'trigger' => $trigger,
-            'trigger_at' => isset($sel['trigger_at']) && is_numeric($sel['trigger_at']) ? (int) $sel['trigger_at'] : null,
-            'policy' => $policy,
-            'reset_usage' => !empty($sel['reset_usage']) && rxRenewalPolicyAllowsUsageReset($policy),
+            'policy' => $settings['policy'],
+            'conditions' => $settings['conditions'],
+            'trigger_at' => $settings['date_at'],
+            'reset_usage' => false,
         ];
     }
 }
 
-if (!function_exists('rxReservationSettingsView')) {
-    function rxReservationSettingsView(array $selection, ?array $snapshot, string $previewText = '', string $idInvoice = '', ?array $settings = null): array
+if (!function_exists('rxReservationStoredSelection')) {
+    function rxReservationStoredSelection($stored): ?array
     {
-        $settings = $settings ?? rxReservationPanelSettings(null);
-        $availability = rxReservationTriggerAvailability($snapshot);
-        $trigger = (string) $selection['trigger'];
-        $policy = (string) $selection['policy'];
-        $resetUsage = !empty($selection['reset_usage']) && rxRenewalPolicyAllowsUsageReset($policy);
-        $cb = function (string $action) use ($idInvoice) {
-            return 'rsvc:' . $idInvoice . ':' . $action;
-        };
-        $lines = [rxRenewalText('reservation_settings_title'), ''];
-        if ($trigger === 'date' && empty($selection['trigger_at'])) {
-            $lines[] = rxRenewalText('reservation_trigger', ['label' => rxRenewalText('trigger_date') . ' (' . rxRenewalText('reservation_date_unset') . ')']);
+        if (!is_array($stored) || !isset($stored['policy'])) {
+            return null;
         }
-        if ($previewText !== '') {
-            $lines[] = $previewText;
+        if (!isset($stored['conditions']) && !isset($stored['trigger'])) {
+            return null;
         }
-        foreach (rxReservationSelectableTriggers() as $key) {
-            if (empty($availability[$key]['available'])) {
-                $lines[] = rxRenewalText('mark_unavailable') . ' ' . rxRenewalText('trigger_' . $key) . ' : ' . (string) $availability[$key]['reason'];
-            }
-        }
-        $lines[] = '';
-        $lines[] = rxRenewalText('reservation_settings_hint');
-        $rows = [[['text' => rxRenewalText('section_policy'), 'callback_data' => $cb('x')]]];
-        foreach (array_keys(rxRenewalPolicies()) as $index => $key) {
-            if (!in_array($key, $settings['allowed_policies'], true)) {
-                continue;
-            }
-            $rows[] = [['text' => ($key === $policy ? rxRenewalText('mark_on') . ' ' : '') . rxRenewalPolicyLabel($key, false, true), 'callback_data' => $cb('p' . $index)]];
-        }
-        if (rxRenewalPolicyAllowsUsageReset($policy)) {
-            $rows[] = [['text' => rxRenewalText('reservation_btn_usage', ['label' => rxRenewalText($resetUsage ? 'mark_on' : 'mark_off')]), 'callback_data' => $cb('u')]];
-        }
-        $rows[] = [['text' => rxRenewalText('section_trigger'), 'callback_data' => $cb('x')]];
-        foreach (rxReservationSelectableTriggers() as $index => $key) {
-            $mark = empty($availability[$key]['available']) ? rxRenewalText('mark_unavailable') . ' ' : ($key === $trigger ? rxRenewalText('mark_on') . ' ' : '');
-            $rows[] = [['text' => $mark . rxRenewalText('trigger_' . $key), 'callback_data' => $cb('t' . $index)]];
-        }
-        if ($trigger === 'date') {
-            $label = rxRenewalText('reservation_btn_date');
-            if (!empty($selection['trigger_at'])) {
-                $label .= ' (' . rxRenewalFormatExpire((int) $selection['trigger_at']) . ')';
-            }
-            $rows[] = [['text' => $label, 'callback_data' => $cb('d')]];
-        }
-        return ['text' => implode("\n", $lines), 'keyboard' => json_encode(['inline_keyboard' => $rows], JSON_UNESCAPED_UNICODE)];
+        return $stored;
     }
 }
 
@@ -1265,42 +1361,33 @@ if (!function_exists('rxReservationUiEnabled')) {
     }
 }
 
-if (!function_exists('rxReservationBuildView')) {
-    function rxReservationBuildView($managePanel, array $panel, array $invoice, ?array $selection, $volumeGb, $days): array
-    {
-        $settings = rxReservationPanelSettings($panel);
-        $snapshot = rx_pf_panel_snapshot($managePanel, (string) $panel['name_panel'], (string) $invoice['username'], (string) ($panel['type'] ?? ''));
-        $usable = !empty($snapshot['ok']) && !empty($snapshot['exists']) ? $snapshot : null;
-        $selection = $selection ?? rxReservationDefaultSelection($usable, $settings);
-        $preview = rxRenewalPreviewForService($managePanel, $panel, (string) $invoice['username'], $volumeGb, $days, [
-            'reservation' => $selection,
-            'snapshot' => $snapshot,
-            'id_invoice' => (string) ($invoice['id_invoice'] ?? ''),
-        ]);
-        return [
-            'selection' => $selection,
-            'snapshot' => $usable,
-            'settings' => $settings,
-            'preview' => $preview,
-            'view' => rxReservationSettingsView($selection, $usable, (string) ($preview['text'] ?? ''), (string) ($invoice['id_invoice'] ?? ''), $settings),
-        ];
-    }
-}
-
 if (!function_exists('rxReservationAdminState')) {
     function rxReservationAdminState(array $settings): array
     {
-        $policies = array_keys(rxRenewalPolicies());
         $mask = 0;
-        foreach ($policies as $index => $key) {
-            if (in_array($key, $settings['allowed_policies'], true)) {
+        foreach (rxReservationConditions() as $index => $key) {
+            if (in_array($key, $settings['conditions'], true)) {
                 $mask |= (1 << $index);
             }
         }
+        $index = array_search($settings['policy'], rxReservationAdminPolicies(), true);
+        return ['p' => $index === false ? 1 : (int) $index, 'mask' => $mask, 'at' => (int) ($settings['date_at'] ?? 0)];
+    }
+}
+
+if (!function_exists('rxReservationAdminSettingsFromState')) {
+    function rxReservationAdminSettingsFromState(array $state): array
+    {
+        $conditions = [];
+        foreach (rxReservationConditions() as $index => $key) {
+            if (((int) $state['mask'] >> $index) & 1) {
+                $conditions[] = $key;
+            }
+        }
         return [
-            'pd' => (int) array_search($settings['default_policy'], $policies, true),
-            'td' => (int) array_search($settings['default_trigger'], rxReservationSelectableTriggers(), true),
-            'mask' => $mask,
+            'policy' => rxReservationAdminPolicies()[(int) $state['p']] ?? 'reset_all',
+            'conditions' => $conditions,
+            'date_at' => in_array('date', $conditions, true) && (int) $state['at'] > 0 ? (int) $state['at'] : null,
         ];
     }
 }
@@ -1308,51 +1395,55 @@ if (!function_exists('rxReservationAdminState')) {
 if (!function_exists('rxReservationAdminCallback')) {
     function rxReservationAdminCallback(string $code, array $state, string $action): string
     {
-        return 'rsva:' . $code . ':' . (int) $state['pd'] . (int) $state['td'] . ':' . sprintf('%02x', (int) $state['mask'] & 63) . ':' . $action;
+        return 'rsva:' . $code . ':' . (int) $state['p'] . ':' . ((int) $state['mask'] & 7) . ':' . base_convert((string) max(0, (int) $state['at']), 10, 36) . ':' . (!empty($state['selected']) ? '1' : '0') . ':' . $action;
     }
 }
 
 if (!function_exists('rxReservationAdminParse')) {
     function rxReservationAdminParse(string $data): ?array
     {
-        if (!preg_match('/^rsva:([A-Za-z0-9_-]{1,40}):([0-5])([0-3]):([0-9a-f]{2}):([a-z])([0-9]?)$/', $data, $m)) {
+        if (!preg_match('/^rsva:([A-Za-z0-9_-]{1,40}):([0-3]):([0-7]):([0-9a-z]{1,8}):(?:([01]):)?([a-z])([0-9]?)$/', $data, $m)) {
             return null;
         }
         return [
             'code' => $m[1],
-            'state' => ['pd' => (int) $m[2], 'td' => (int) $m[3], 'mask' => hexdec($m[4]) & 63],
-            'action' => $m[5],
-            'arg' => $m[6] === '' ? null : (int) $m[6],
+            'state' => ['p' => (int) $m[2], 'mask' => (int) $m[3], 'at' => (int) base_convert($m[4], 36, 10), 'selected' => $m[5] === '' || $m[5] === '1'],
+            'action' => $m[6],
+            'arg' => $m[7] === '' ? null : (int) $m[7],
         ];
     }
 }
 
-if (!function_exists('rxReservationAdminSettingsFromState')) {
-    function rxReservationAdminSettingsFromState(array $state): array
+if (!function_exists('rxReservationAdminStepEncode')) {
+    function rxReservationAdminStepEncode(string $code, array $state): string
     {
-        $policies = array_keys(rxRenewalPolicies());
-        $allowed = [];
-        foreach ($policies as $index => $key) {
-            if (((int) $state['mask'] >> $index) & 1) {
-                $allowed[] = $key;
-            }
+        return 'rsvadate|' . $code . '|' . (int) $state['p'] . '|' . ((int) $state['mask'] & 7) . '|' . max(0, (int) $state['at']);
+    }
+}
+
+if (!function_exists('rxReservationAdminStepDecode')) {
+    function rxReservationAdminStepDecode(string $step): ?array
+    {
+        if (!preg_match('/^rsvadate\|([A-Za-z0-9_-]{1,40})\|([0-3])\|([0-7])\|([0-9]{1,12})$/', $step, $m)) {
+            return null;
         }
-        return [
-            'default_policy' => $policies[(int) $state['pd']] ?? 'reset_all',
-            'default_trigger' => rxReservationSelectableTriggers()[(int) $state['td']] ?? 'either',
-            'allowed_policies' => $allowed,
-        ];
+        return ['code' => $m[1], 'state' => ['p' => (int) $m[2], 'mask' => (int) $m[3], 'at' => (int) $m[4]]];
     }
 }
 
 if (!function_exists('rxReservationAdminValidate')) {
-    function rxReservationAdminValidate(array $state): ?string
+    function rxReservationAdminValidate(array $state, int $now): ?string
     {
-        if (((int) $state['mask'] & 63) === 0) {
-            return rxRenewalText('admin_allowed_empty');
+        if (((int) $state['mask'] & 7) === 0) {
+            return rxRenewalText('admin_conditions_empty');
         }
-        if (!(((int) $state['mask'] >> (int) $state['pd']) & 1)) {
-            return rxRenewalText('admin_default_not_allowed');
+        if ((((int) $state['mask'] >> 2) & 1) === 1) {
+            if ((int) $state['at'] <= 0) {
+                return rxRenewalText('admin_date_required');
+            }
+            if ((int) $state['at'] <= $now) {
+                return rxRenewalText('admin_date_past');
+            }
         }
         return null;
     }
@@ -1361,12 +1452,10 @@ if (!function_exists('rxReservationAdminValidate')) {
 if (!function_exists('rxReservationAdminApply')) {
     function rxReservationAdminApply(array $state, string $action, ?int $arg): array
     {
-        if ($action === 'p' && $arg !== null && $arg < count(rxRenewalPolicies())) {
-            $state['pd'] = $arg;
-        } elseif ($action === 't' && $arg !== null && $arg < count(rxReservationSelectableTriggers())) {
-            $state['td'] = $arg;
-        } elseif ($action === 'a' && $arg !== null && $arg < count(rxRenewalPolicies())) {
-            $state['mask'] = ((int) $state['mask'] ^ (1 << $arg)) & 63;
+        if ($action === 'p' && $arg !== null && $arg < count(rxReservationAdminPolicies())) {
+            $state['p'] = $arg;
+        } elseif ($action === 'c' && $arg !== null && $arg < count(rxReservationConditions())) {
+            $state['mask'] = ((int) $state['mask'] ^ (1 << $arg)) & 7;
         }
         return $state;
     }
@@ -1376,7 +1465,8 @@ if (!function_exists('rxReservationAdminView')) {
     function rxReservationAdminView(array $panel, array $state, string $notice = ''): array
     {
         $code = (string) $panel['code_panel'];
-        $policies = array_keys(rxRenewalPolicies());
+        $policies = rxReservationAdminPolicies();
+        $settings = rxReservationAdminSettingsFromState($state);
         $lines = [rxRenewalText('admin_title', ['panel' => htmlspecialchars((string) $panel['name_panel'], ENT_QUOTES, 'UTF-8')]), ''];
         if ($notice !== '') {
             $lines[] = $notice;
@@ -1388,22 +1478,32 @@ if (!function_exists('rxReservationAdminView')) {
             $lines[] = ($index + 1) . '. ' . rxRenewalPolicyLabel($key);
         }
         $lines[] = '';
-        $lines[] = rxRenewalText('admin_date_note');
+        if ($settings['conditions'] !== [] && (!in_array('date', $settings['conditions'], true) || (int) $state['at'] > 0)) {
+            $lines[] = rxRenewalText('admin_summary', ['text' => rxReservationActivationText($settings['conditions'], $state['at'])]);
+        }
+        $lines[] = rxRenewalText('admin_timezone_note', ['tz' => date_default_timezone_get()]);
         if (!rxRenewalPendingSupported((string) ($panel['type'] ?? ''))) {
             $lines[] = rxRenewalText('admin_pending_unsupported');
         }
-        $rows = [[['text' => rxRenewalText('admin_section_default_policy'), 'callback_data' => rxReservationAdminCallback($code, $state, 'x')]]];
+        $rows = [[['text' => rxRenewalText('admin_section_policy'), 'callback_data' => rxReservationAdminCallback($code, $state, 'x')]]];
         foreach ($policies as $index => $key) {
-            $rows[] = [['text' => ((int) $state['pd'] === $index ? rxRenewalText('mark_on') . ' ' : '') . ($index + 1) . '. ' . rxRenewalPolicyLabel($key, false, true), 'callback_data' => rxReservationAdminCallback($code, $state, 'p' . $index)]];
+            $rows[] = [['text' => ((int) $state['p'] === $index ? rxRenewalText('mark_on') . ' ' : '') . rxRenewalPolicyLabel($key, false, true), 'callback_data' => rxReservationAdminCallback($code, $state, 'p' . $index)]];
         }
-        $rows[] = [['text' => rxRenewalText('admin_section_default_trigger'), 'callback_data' => rxReservationAdminCallback($code, $state, 'x')]];
-        foreach (rxReservationSelectableTriggers() as $index => $key) {
-            $rows[] = [['text' => ((int) $state['td'] === $index ? rxRenewalText('mark_on') . ' ' : '') . rxRenewalText('trigger_' . $key), 'callback_data' => rxReservationAdminCallback($code, $state, 't' . $index)]];
+        if (empty($state['selected'])) {
+            $rows[] = [['text' => rxRenewalText('admin_btn_back'), 'callback_data' => rxReservationAdminCallback($code, $state, 'b')]];
+            return ['text' => implode("\n", $lines), 'keyboard' => json_encode(['inline_keyboard' => $rows], JSON_UNESCAPED_UNICODE)];
         }
-        $rows[] = [['text' => rxRenewalText('admin_section_allowed'), 'callback_data' => rxReservationAdminCallback($code, $state, 'x')]];
-        foreach ($policies as $index => $key) {
+        $rows[] = [['text' => rxRenewalText('admin_section_conditions'), 'callback_data' => rxReservationAdminCallback($code, $state, 'x')]];
+        foreach (rxReservationConditions() as $index => $key) {
             $enabled = ((int) $state['mask'] >> $index) & 1;
-            $rows[] = [['text' => rxRenewalText($enabled ? 'mark_on' : 'mark_off') . ' ' . ($index + 1) . '. ' . rxRenewalPolicyLabel($key, false, true), 'callback_data' => rxReservationAdminCallback($code, $state, 'a' . $index)]];
+            $label = rxRenewalText('cond_' . $key);
+            if ($key === 'date' && $enabled && (int) $state['at'] > 0) {
+                $label = rxRenewalText('cond_date_at', ['date' => rxRenewalFormatExpire((int) $state['at'])]);
+            }
+            $rows[] = [['text' => rxRenewalText($enabled ? 'mark_on' : 'mark_off') . ' ' . $label, 'callback_data' => rxReservationAdminCallback($code, $state, 'c' . $index)]];
+        }
+        if ((((int) $state['mask'] >> 2) & 1) === 1) {
+            $rows[] = [['text' => rxRenewalText('admin_btn_date'), 'callback_data' => rxReservationAdminCallback($code, $state, 'e')]];
         }
         $rows[] = [
             ['text' => rxRenewalText('admin_btn_save'), 'callback_data' => rxReservationAdminCallback($code, $state, 's')],

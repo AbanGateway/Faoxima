@@ -72,17 +72,9 @@ final class ServiceRenewConfirmHandler extends BaseHandler
             $managePanelCheck = new ManagePanel();
             $snapshotCheck = rx_pf_panel_snapshot($managePanelCheck, (string)$panel['name_panel'], (string)$invoice['username'], (string)($panel['type'] ?? ''));
             if (rxReservationUiEnabled($panel)) {
-                $reservationInput = FaoximaInput::array($this->data, 'reservation');
                 $usableSnapshot = !empty($snapshotCheck['ok']) && !empty($snapshotCheck['exists']) ? $snapshotCheck : null;
-                $reservationSettings = rxReservationPanelSettings($panel);
-                if (!empty($reservationInput['policy']) && !in_array((string)$reservationInput['policy'], $reservationSettings['allowed_policies'], true)) {
-                    FaoximaResponse::fail(422, rxRenewalText('policy_not_allowed'));
-                }
-                $reservation = rxReservationSelectionFromData(['rsv' => !empty($reservationInput) ? $reservationInput : rxReservationDefaultSelection($usableSnapshot, $reservationSettings)], null, $reservationSettings);
-                if (($reservation['trigger'] ?? '') === 'date') {
-                    $reservation['trigger_at'] = rxReservationParseDate((string)($reservationInput['trigger_at'] ?? ''), time());
-                }
-                $selectionCheck = rxReservationNormalizeSelection($reservation, $usableSnapshot, time(), $reservationSettings['allowed_policies']);
+                $reservation = rxReservationPanelSelection($panel);
+                $selectionCheck = rxReservationNormalizeSelection($reservation, $usableSnapshot, time());
                 if (empty($selectionCheck['ok'])) {
                     FaoximaResponse::fail(422, rxRenewalReasonText((string)$selectionCheck['reason'], $selectionCheck));
                 }
@@ -580,11 +572,7 @@ final class ServiceRenewConfirmHandler extends BaseHandler
 
 
         if (!empty($extend['queued'])) {
-            $renewMessage = faoxima_textbot_get('dyn_renewconfirm_queued_success', '✅ سرویس خریداری شده رزرو شد و به محض پایان سرویس فعلی فعال می‌گردد.');
-            if (is_array($extend['reservation'] ?? null)) {
-                $renewMessage .= "\n" . rxRenewalText('reservation_trigger', ['label' => (string)$extend['reservation']['trigger_label']])
-                    . "\n" . rxRenewalText('reservation_policy', ['label' => (string)$extend['reservation']['policy_label']]);
-            }
+            $renewMessage = (string)($extend['reservation']['confirmation'] ?? rxRenewalText('reservation_confirmed'));
         } else {
             $renewMessage = rxRenewalDecorateSuccess(faoxima_textbot_get('dyn_renewconfirm_success', '✅ سرویس شما با موفقیت تمدید شد.'), $extend, (string)$invoice['username'], (string)($panel['name_panel'] ?? ''));
         }

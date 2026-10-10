@@ -437,6 +437,12 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     }
     $rxReservationState = $rxReservationParsed['state'];
     $rxReservationAction = $rxReservationParsed['action'];
+    if ($rxReservationAction === 'p') {
+        $rxReservationState['selected'] = true;
+    } elseif (empty($rxReservationState['selected']) && !in_array($rxReservationAction, ['x', 'b'], true)) {
+        $rxReservationAnswer(rxRenewalText('admin_outdated'), true);
+        return;
+    }
     if ($rxReservationAction === 'x') {
         $rxReservationAnswer();
         return;
@@ -449,8 +455,17 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
         outtypepanel($rxReservationPanel['type'], $textbotlang['Admin']['Back-menu']);
         return;
     }
+    $rxReservationDateOn = (((int) $rxReservationState['mask'] >> 2) & 1) === 1;
+    if ($rxReservationAction === 'e' || ($rxReservationAction === 'c' && $rxReservationParsed['arg'] === 2 && !$rxReservationDateOn)) {
+        $rxReservationAnswer();
+        $rxReservationState['mask'] = ((int) $rxReservationState['mask'] | 4) & 7;
+        update("user", "Processing_value", $rxReservationPanel['name_panel'], "id", $from_id);
+        step(rxReservationAdminStepEncode((string) $rxReservationPanel['code_panel'], $rxReservationState), $from_id);
+        nm_adminInstantReply($from_id, rxRenewalText('admin_date_prompt', ['tz' => date_default_timezone_get()]), $backadmin ?? null, 'HTML');
+        return;
+    }
     if ($rxReservationAction === 's') {
-        $rxReservationError = rxReservationAdminValidate($rxReservationState);
+        $rxReservationError = rxReservationAdminValidate($rxReservationState, time());
         if ($rxReservationError !== null) {
             $rxReservationAnswer($rxReservationError, true);
             $rxReservationAdminView = rxReservationAdminView($rxReservationPanel, $rxReservationState, $rxReservationError);
@@ -458,10 +473,10 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
             return;
         }
         rx_rn_ensure_schema();
-        update("marzban_panel", "reservation_settings", json_encode(rxReservationAdminSettingsFromState($rxReservationState), JSON_UNESCAPED_UNICODE), "code_panel", $rxReservationPanel['code_panel']);
+        update("marzban_panel", "reservation_settings", rxReservationSettingsJson(rxReservationAdminSettingsFromState($rxReservationState)), "code_panel", $rxReservationPanel['code_panel']);
         update("marzban_panel", "Methodextend", 'رزرو اشتراک', "code_panel", $rxReservationPanel['code_panel']);
         $rxReservationAnswer(rxRenewalText('admin_saved'));
-        Editmessagetext($from_id, $message_id, rxRenewalText('admin_saved'), json_encode(['inline_keyboard' => []]));
+        Editmessagetext($from_id, $message_id, rxRenewalText('admin_saved') . "\n" . rxRenewalText('admin_summary', ['text' => rxReservationActivationText(rxReservationAdminSettingsFromState($rxReservationState)['conditions'], $rxReservationState['at'])]), json_encode(['inline_keyboard' => []]));
         update("user", "Processing_value", $rxReservationPanel['name_panel'], "id", $from_id);
         step('PanelMenu', $from_id);
         outtypepanel($rxReservationPanel['type'], $textbotlang['Admin']['Algortimeextend']['SaveData']);
@@ -471,6 +486,27 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     $rxReservationAnswer();
     $rxReservationAdminView = rxReservationAdminView($rxReservationPanel, $rxReservationState);
     Editmessagetext($from_id, $message_id, $rxReservationAdminView['text'], $rxReservationAdminView['keyboard'], 'HTML');
+} elseif (is_string($user['step'] ?? null) && strpos((string) $user['step'], 'rsvadate|') === 0) {
+    if (!isset($update['message']) && empty($text)) { return; }
+    $rxReservationDraft = rxReservationAdminStepDecode((string) $user['step']);
+    $rxReservationPanel = is_array($rxReservationDraft) ? select("marzban_panel", "*", "code_panel", $rxReservationDraft['code'], "select") : false;
+    if (!in_array($from_id, $admin_ids) || ($adminrulecheck['rule'] ?? '') != "administrator" || !is_array($rxReservationDraft) || !is_array($rxReservationPanel)) {
+        step('home', $from_id);
+        nm_adminInstantReply($from_id, rxRenewalText('admin_outdated'), $keyboardadmin ?? null, 'HTML');
+        return;
+    }
+    $rxReservationAt = rxReservationParseDate($text, time());
+    if ($rxReservationAt === null) {
+        nm_adminInstantReply($from_id, rxRenewalText('admin_date_invalid'), null, 'HTML');
+        return;
+    }
+    $rxReservationState = $rxReservationDraft['state'];
+    $rxReservationState['selected'] = true;
+    $rxReservationState['mask'] = ((int) $rxReservationState['mask'] | 4) & 7;
+    $rxReservationState['at'] = $rxReservationAt;
+    step('PanelMenu', $from_id);
+    $rxReservationAdminView = rxReservationAdminView($rxReservationPanel, $rxReservationState, rxRenewalText('admin_date_saved', ['date' => rxRenewalFormatExpire($rxReservationAt)]));
+    sendmessage($from_id, $rxReservationAdminView['text'], $rxReservationAdminView['keyboard'], 'HTML');
 } elseif ($text == "🔋 روش تمدید سرویس" && $adminrulecheck['rule'] == "administrator") {
     $rxExtendMethodGuide = "🔋 روش تمدید را انتخاب کنید.
 
@@ -490,7 +526,7 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
         . "🔄 «اضافه شدن زمان و تبدیل حجم کل به حجم باقی مانده»: مصرف صفر می‌شود اما حجم باقی‌مانده حذف نمی‌شود؛ حجم کل = حجم باقی‌مانده + حجم خرید؛ انقضا = انقضای فعلی + روزهای خرید.
 
 "
-        . "📌 «رزرو اشتراک»: سرویس فعلی تغییر نمی‌کند؛ پس از انتخاب، منوی تنظیمات رزرو باز می‌شود تا سیاست و زمان فعال‌سازی پیش‌فرض و سیاست‌های مجاز مشتری را تعیین کنید؛ مشتری از بین گزینه‌های مجاز یک سیاست و یک زمان فعال‌سازی (اتمام حجم یا انقضا، فقط اتمام حجم، فقط انقضا یا تاریخ مشخص) انتخاب می‌کند و حجم و زمان باقی‌مانده در لحظه فعال‌سازی محاسبه می‌شود.
+        . "📌 «رزرو اشتراک»: سرویس فعلی تغییر نمی‌کند؛ ابتدا مدیر یکی از چهار روش تمدید را انتخاب می‌کند و سپس یک یا چند شرط فعال‌سازی (اتمام حجم، پایان زمان یا تاریخ مشخص) را تعیین می‌کند. رزرو با رسیدن اولین شرط انتخاب‌شده فعال می‌شود. مشتری فقط خرید را تأیید می‌کند و امکان تغییر تنظیمات را ندارد؛ حجم و زمان باقی‌مانده در لحظه فعال‌سازی محاسبه می‌شود.
 
 "
         . "ℹ️ مصرف بیش از سقف قبلی هیچ‌گاه از حجم خریداری‌شده کم نمی‌شود. برای سرویس منقضی‌شده، روزهای خرید از زمان اجرا محاسبه و سرویس دوباره فعال می‌شود. سرویسی که توسط مدیر غیرفعال شده تمدید خودکار نمی‌شود.";
@@ -525,7 +561,7 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
         }
         update("user", "Processing_value", $panelName, "id", $from_id);
         step('PanelMenu', $from_id);
-        $rxReservationAdminView = rxReservationAdminView($rxReservationPanel, rxReservationAdminState(rxReservationPanelSettings($rxReservationPanel)));
+        $rxReservationAdminView = rxReservationAdminView($rxReservationPanel, array_merge(rxReservationAdminState(rxReservationPanelSettings($rxReservationPanel)), ['selected' => false]));
         nm_adminInstantReply($from_id, $rxReservationAdminView['text'], $rxReservationAdminView['keyboard'], 'HTML');
         return;
     }

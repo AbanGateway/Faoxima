@@ -63,7 +63,7 @@ foreach ($queuedRows as $row) {
     $diagnostic = "<blockquote>شناسه رزرو : <code>{$row['id']}</code></blockquote>\n"
         . "<blockquote>نام کاربری سرویس : <code>" . $rxQrEsc($row['username']) . "</code></blockquote>\n"
         . "<blockquote>نام پنل : " . $rxQrEsc($row['name_panel']) . "</blockquote>\n"
-        . "<blockquote>زمان فعال‌سازی : " . $rxQrEsc(rxReservationTriggerLabel((string) ($row['trigger_type'] ?? 'either'), $row['trigger_at'] ?? null)) . "</blockquote>\n"
+        . "<blockquote>زمان فعال‌سازی : " . $rxQrEsc(rxReservationTriggerLabel((string) ($row['trigger_type'] ?? 'either'), $row['trigger_at'] ?? null, rxReservationRowConditions($row))) . "</blockquote>\n"
         . "<blockquote>سیاست اجرا : " . $rxQrEsc(rxRenewalPolicyLabel((string) ($row['policy'] ?? 'reset_all'), !empty($row['reset_usage']))) . "</blockquote>\n"
         . "<blockquote>تلاش : " . (int) ($fresh['attempt_count'] ?? 0) . "</blockquote>";
 

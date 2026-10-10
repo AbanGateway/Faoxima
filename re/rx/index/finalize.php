@@ -379,7 +379,7 @@ if (isset($update['pre_checkout_query'])) {
     $prodcut['price_product'] = number_format($prodcut['price_product']);
     $balanceformatsell = number_format(select("user", "Balance", "id", $from_id, "select")['Balance'], 0);
     if (!empty($extend['queued'])) {
-        $rxQueuedSuccessTpl = $datatextbot['dyn_renewconfirm_queued_success'] ?? '✅ سرویس خریداری شده رزرو شد و به محض پایان سرویس فعلی فعال می‌گردد.';
+        $rxQueuedSuccessTpl = (string) ($extend['reservation']['confirmation'] ?? rxRenewalText('reservation_confirmed'));
         $textextend = "$rxQueuedSuccessTpl
 
 ▫️نام سرویس : $usernamePanelExtends

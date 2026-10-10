@@ -1577,7 +1577,6 @@ function renderRenewConfirm($panel, opts, choice, username, reload) {
                 <span class="kv-label muted" style="font-size:12px">${m.split(' ')[0]}</span>
                 <span class="kv-value mono">${escapeHtml(m.replace(/<[^>]+>/g,'').trim())}</span>
             </div>`).join('')}
-            <div id="rc-reservation" class="mt-sm" style="display:none"></div>
             <div id="rc-preview" class="muted mt-sm" style="font-size:12px;white-space:pre-line">در حال دریافت پیش‌نمایش تمدید…</div>
             <div class="kv">
                 <span class="kv-label">${icon('coin')} مبلغ</span>
@@ -1643,69 +1642,7 @@ function renderRenewConfirm($panel, opts, choice, username, reload) {
     const $btn = $host.querySelector('#rc-submit');
     const $label = $btn.querySelector('.rc-label');
     const $preview = $host.querySelector('#rc-preview');
-    const $reservation = $host.querySelector('#rc-reservation');
-    let reservationSel = null;
     let previewSeq = 0;
-    const renderReservation = (res) => {
-        if (!$reservation) return;
-        if (!res) {
-            $reservation.style.display = 'none';
-            $reservation.innerHTML = '';
-            return;
-        }
-        const sel = res.selection || {};
-        const policies = Array.isArray(res.policies) ? res.policies : [];
-        const triggers = Array.isArray(res.triggers) ? res.triggers : [];
-        const policy = policies.find((p) => p.key === sel.policy) || policies[0] || {};
-        const dateValue = sel.trigger_at ? new Date(Number(sel.trigger_at) * 1000).toISOString().slice(0, 10) : '';
-        $reservation.style.display = 'block';
-        $reservation.innerHTML = `
-            <div class="kv">
-                <span class="kv-label">${icon('hourglass')} زمان فعال‌سازی</span>
-                <select id="rc-rsv-trigger" class="kv-value" style="max-width:60%">
-                    ${triggers.map((t) => `<option value="${escapeHtml(t.key)}" ${t.key === sel.trigger ? 'selected' : ''} ${t.available ? '' : 'disabled'}>${escapeHtml(t.label)}${t.available ? '' : ' (غیرفعال)'}</option>`).join('')}
-                </select>
-            </div>
-            ${triggers.filter((t) => !t.available && t.reason).map((t) => `<p class="muted" style="font-size:11px">⛔️ ${escapeHtml(t.label)}: ${escapeHtml(t.reason)}</p>`).join('')}
-            ${sel.trigger === 'date' ? `
-            <div class="kv">
-                <span class="kv-label">${icon('calendar')} تاریخ فعال‌سازی</span>
-                <input id="rc-rsv-date" type="date" class="kv-value" value="${escapeHtml(dateValue)}" />
-            </div>` : ''}
-            <div class="kv">
-                <span class="kv-label">${icon('rotate')} سیاست اجرا</span>
-                <select id="rc-rsv-policy" class="kv-value" style="max-width:60%">
-                    ${policies.map((p) => `<option value="${escapeHtml(p.key)}" ${p.key === sel.policy ? 'selected' : ''}>${escapeHtml(p.short || p.label)}</option>`).join('')}
-                </select>
-            </div>
-            <p class="muted" style="font-size:11px">${escapeHtml(policy.label || '')}</p>
-            ${policy.usage_reset_option ? `
-            <label class="kv" style="cursor:pointer">
-                <span class="kv-label">صفر کردن شمارنده مصرف</span>
-                <input id="rc-rsv-reset" type="checkbox" ${sel.reset_usage ? 'checked' : ''} />
-            </label>
-            <p class="muted" style="font-size:11px">${escapeHtml(res.usage_note || '')}</p>` : ''}
-        `;
-        const readSel = () => {
-            const next = {
-                trigger: $reservation.querySelector('#rc-rsv-trigger')?.value || sel.trigger,
-                policy: $reservation.querySelector('#rc-rsv-policy')?.value || sel.policy,
-                reset_usage: !!$reservation.querySelector('#rc-rsv-reset')?.checked,
-            };
-            const d = $reservation.querySelector('#rc-rsv-date')?.value || '';
-            if (next.trigger === 'date' && d) {
-                const ts = Math.floor(new Date(`${d}T00:00:00`).getTime() / 1000);
-                if (ts > 0) next.trigger_at = String(ts);
-            }
-            return next;
-        };
-        $reservation.querySelectorAll('select, input').forEach(($el) => {
-            $el.addEventListener('change', () => {
-                reservationSel = readSel();
-                loadPreview();
-            });
-        });
-    };
     const loadPreview = async () => {
         const seq = ++previewSeq;
         $btn.disabled = true;
@@ -1716,19 +1653,10 @@ function renderRenewConfirm($panel, opts, choice, username, reload) {
             } else {
                 previewBody.product_code = choice.code;
             }
-            if (reservationSel) {
-                previewBody.reservation = reservationSel;
-            }
             const pr = await call('service_renew_preview', { method: 'POST', body: previewBody });
             if (seq !== previewSeq) return;
             const pobj = pr?.obj || {};
             if ($preview) $preview.textContent = String(pobj.text || '');
-            if (pobj.reservation) {
-                reservationSel = pobj.reservation.selection || reservationSel;
-                renderReservation(pobj.reservation);
-            } else {
-                renderReservation(null);
-            }
             $btn.disabled = !!pobj.blocked;
         } catch (err) {
             if (seq !== previewSeq) return;
@@ -1757,9 +1685,6 @@ function renderRenewConfirm($panel, opts, choice, username, reload) {
             }
             if (choice.fx_quote) {
                 body.fx_quote = choice.fx_quote;
-            }
-            if (reservationSel) {
-                body.reservation = reservationSel;
             }
             const res = await call('service_renew_confirm', { method: 'POST', body });
             const obj = res?.obj || {};
