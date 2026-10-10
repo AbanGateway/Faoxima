@@ -735,19 +735,30 @@ env_set() {
 
 
 mysql_binlog_query() {
-    local root_pass
+    local root_pass output status
     root_pass=$(env_get MYSQL_ROOT_PASSWORD 2>/dev/null || true)
     if [ -z "$root_pass" ]; then
         ui_err "MYSQL_ROOT_PASSWORD is missing from the installation configuration."
         return 1
     fi
-    dc exec -T -e MYSQL_PWD="$root_pass" db sh -c '
+    if output=$(dc exec -T -e MYSQL_PWD="$root_pass" db sh -c '
         if ! command -v timeout >/dev/null 2>&1; then
             echo "The database container is missing the timeout utility." >&2
             exit 1
         fi
-        exec timeout 30s mysql --connect-timeout=5 --batch --skip-column-names -uroot -e "$1"
-    ' sh "$1"
+        exec timeout -k 5s 30s mysql --connect-timeout=5 --batch --skip-column-names -uroot -e "$1"
+    ' sh "$1" 2>&1); then
+        printf '%s\n' "$output"
+        return 0
+    else
+        status=$?
+        [ -z "$output" ] || printf '%s\n' "$output" >&2
+        case "$status" in
+            124|137) printf '%s\n' "MySQL did not respond within 30 seconds. A full disk can block MySQL even when the container reports healthy. Free some disk space outside the database, then retry." >&2 ;;
+            *) [ -n "$output" ] || printf 'MySQL command failed without diagnostic output (exit code %s). Check the database container logs and disk space.\n' "$status" >&2 ;;
+        esac
+        return "$status"
+    fi
 }
 
 cleanup_mysql_binlogs_now() {
