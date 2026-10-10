@@ -734,6 +734,80 @@ env_set() {
 }
 
 
+mysql_binlog_query() {
+    local root_pass
+    root_pass=$(env_get MYSQL_ROOT_PASSWORD 2>/dev/null || true)
+    if [ -z "$root_pass" ]; then
+        ui_err "MYSQL_ROOT_PASSWORD is missing from the installation configuration."
+        return 1
+    fi
+    dc exec -T -e MYSQL_PWD="$root_pass" db sh -c '
+        if ! command -v timeout >/dev/null 2>&1; then
+            echo "The database container is missing the timeout utility." >&2
+            exit 1
+        fi
+        exec timeout 30s mysql --connect-timeout=5 --batch --skip-column-names -uroot -e "$1"
+    ' sh "$1"
+}
+
+cleanup_mysql_binlogs_now() {
+    local logs active_log before_bytes after_bytes output confirm pass
+    if [ ! -f "$ENV_FILE" ] || [ ! -f "$COMPOSE_FILE" ]; then
+        ui_err "No installed database configuration was found."
+        return 1
+    fi
+    ui_action "Checking MySQL binary logs..."
+    if ! logs=$(mysql_binlog_query "SHOW BINARY LOGS;" 2>&1); then
+        ui_err "Cannot read binary logs: ${logs}"
+        ui_info "If the disk is completely full, free some build cache first and retry."
+        return 1
+    fi
+    before_bytes=$(printf '%s\n' "$logs" | awk '{total += $2} END {printf "%.0f", total}')
+    ui_info "Current binary logs: $(printf '%s\n' "$logs" | awk 'NF {n++} END {print n+0}'), total $(awk -v bytes="$before_bytes" 'BEGIN {printf "%.2f MiB", bytes/1048576}')."
+    ui_info "This affects the shared MySQL server used by all installed bots. Database tables are preserved."
+    ui_warn "All inactive binary logs will be removed, including recent ones. Their recovery history will be lost."
+    ui_warn "Do not continue if an offline replica or a backup still needs these logs."
+    printf '  %s❯%s Clean binary logs now? [y/N]: ' "$C_YELLOW" "$C_RESET"
+    read -r confirm
+    if [[ "${confirm,,}" != "y" ]]; then
+        ui_info "Cancelled."
+        return 0
+    fi
+    for pass in 1 2; do
+        active_log=$(printf '%s\n' "$logs" | awk 'NF {name=$1} END {print name}')
+        if [[ ! "$active_log" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+            ui_err "MySQL returned an unexpected binary log name; cleanup stopped."
+            return 1
+        fi
+        ui_action "Removing binary logs older than ${active_log}..."
+        if ! output=$(mysql_binlog_query "PURGE BINARY LOGS TO '${active_log}'; SHOW WARNINGS;" 2>&1); then
+            ui_err "Binary log cleanup failed: ${output}"
+            return 1
+        fi
+        [ -n "$output" ] && ui_warn "$output"
+        if [ "$pass" -eq 1 ]; then
+            ui_action "Rotating the current binary log..."
+            if ! output=$(mysql_binlog_query "FLUSH BINARY LOGS;" 2>&1); then
+                ui_warn "Old logs were processed, but the current log could not be rotated: ${output}"
+                ui_info "Free additional disk space and retry."
+                return 1
+            fi
+            if ! logs=$(mysql_binlog_query "SHOW BINARY LOGS;" 2>&1); then
+                ui_err "Cannot read binary logs after rotation: ${logs}"
+                return 1
+            fi
+        fi
+    done
+    if ! logs=$(mysql_binlog_query "SHOW BINARY LOGS;" 2>&1); then
+        ui_err "Cleanup commands completed, but the final log size could not be verified: ${logs}"
+        return 1
+    fi
+    after_bytes=$(printf '%s\n' "$logs" | awk '{total += $2} END {printf "%.0f", total}')
+    ui_ok "Binary log cleanup completed."
+    ui_info "$(awk -v before="$before_bytes" -v after="$after_bytes" 'BEGIN {saved=before-after; if (saved<0) saved=0; printf "Binary log size reduced by %.2f MiB; remaining %.2f MiB.", saved/1048576, after/1048576}')"
+    ui_info "The active log and any logs MySQL needs for connected replicas are retained."
+}
+
 cleanup_mysql_binlogs() {
     local root_pass
     root_pass=$(env_get MYSQL_ROOT_PASSWORD 2>/dev/null || true)
@@ -5846,10 +5920,11 @@ menu_database() {
         "${C_WHITE}[3]${C_RESET} Import Database" \
         "${C_WHITE}[4]${C_RESET} Optimize Database & Server" \
         "${C_WHITE}[5]${C_RESET} Install / Enable Redis" \
-        "${C_RED}[6]${C_RESET} Back to main menu"
+        "${C_WHITE}[6]${C_RESET} Clean MySQL Binary Logs Now" \
+        "${C_RED}[7]${C_RESET} Back to main menu"
 
     local option
-    printf '  %s❯%s Select an option [1-6]: ' "$C_YELLOW" "$C_RESET"
+    printf '  %s❯%s Select an option [1-7]: ' "$C_YELLOW" "$C_RESET"
     read -r option
 
     case "$option" in
@@ -5858,7 +5933,8 @@ menu_database() {
         3) import_database ;;
         4) optimize_database ;;
         5) install_redis ;;
-        6) return 0 ;;
+        6) cleanup_mysql_binlogs_now ;;
+        7) return 0 ;;
         *)
             ui_err "Invalid option. Please try again."
             sleep 2
