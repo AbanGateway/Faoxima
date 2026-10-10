@@ -1,7 +1,7 @@
 import { escapeHtml, fmtBytes, copyToClipboard, toast, blobToDataUrl } from '../utils.js?v=0.0.52';
 import { icon } from '../icons.js?v=0.0.52';
 import { hapticImpact } from '../telegram.js?v=0.0.52';
-import { renderServiceOutputs } from './service.js?v=0.0.52';
+import { renderServiceOutputs } from './service.js?v=0.0.53';
 
 
 function gaugeSvg(percent, opts = {}) {

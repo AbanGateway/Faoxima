@@ -896,26 +896,18 @@ if (strpos($text, "/start ") !== false && $user['step'] != "gettextSystemMessage
                 sendmessage($from_id, $textbotlang['users']['affiliates']['affiliateedago'], null, 'html');
                 return;
             }
-            update("user", "affiliates", $affiliatesid, "id", $from_id);
-            $useraffiliates = select("user", "*", 'id', $affiliatesid, "select");
-            $rxWelcomeAlertTpl = $datatextbot['dyn_referral_welcome_alert'] ?? "<b>🎉 خوش آمدی!</b>\n\nشما با دعوت <b>@%s</b> وارد ربات شدی و به عنوان زیرمجموعه ثبت شدی ✅\n\nبرای دریافت هدیه عضویت:\n🔘 به منوی <b>زیرمجموعه‌گیری</b> برو\n🔘 دکمه <b>🎁 هدیه عضویت</b> را بزن\n\nبا این کار، هم خودت و هم معرفت هدیه می‌گیرید! 💰";
-            sendmessage($from_id, sprintf($rxWelcomeAlertTpl, $useraffiliates['username']), $keyboard, 'html');
-            $rxInviterRewardTpl = $datatextbot['dyn_referral_inviter_reward_alert'] ?? "<b>🎉 یک زیرمجموعه جدید!</b>\n\nکاربر <b>@%s</b> با لینک دعوت شما وارد ربات شد ✅\n\nبا خریدهای این کاربر، <b>سهم هدیه شما</b> به حسابت واریز می‌شه 🔥";
-            sendmessage($affiliatesid, sprintf($rxInviterRewardTpl, $username), $keyboard, 'html');
-            $addcountaffiliates = intval($useraffiliates['affiliatescount']) + 1;
-            update("user", "affiliatescount", $addcountaffiliates, "id", $affiliatesid);
-            $dateacc = date('Y/m/d H:i:s');
-            $stmt = $pdo->prepare("INSERT INTO reagent_report (user_id, get_gift, time, reagent)
-                                   VALUES (:user_id, :get_gift, :time, :reagent)
-                                   ON DUPLICATE KEY UPDATE reagent = VALUES(reagent), get_gift = VALUES(get_gift), time = VALUES(time)");
-            $stmt->execute([
-                ':user_id' => $from_id,
-                ':get_gift' => 0,
-                ':time' => $dateacc,
-                ':reagent' => $affiliatesid,
-            ]);
-            if (function_exists('clearSelectCache')) {
-                clearSelectCache('reagent_report');
+            $rxReferralState = rxReferralRegister($from_id, $affiliatesid);
+            if ($rxReferralState === 'already_referred') {
+                sendmessage($from_id, $textbotlang['users']['affiliates']['affiliateedago'], null, 'html');
+                return;
+            }
+            if ($rxReferralState === 'registered') {
+                $useraffiliates = select("user", "*", 'id', $affiliatesid, "select");
+                $rxWelcomeAlertTpl = $datatextbot['dyn_referral_welcome_alert'] ?? "<b>🎉 خوش آمدی!</b>\n\nشما با دعوت <b>@%s</b> وارد ربات شدی و به عنوان زیرمجموعه ثبت شدی ✅\n\nبرای دریافت هدیه عضویت:\n🔘 به منوی <b>زیرمجموعه‌گیری</b> برو\n🔘 دکمه <b>🎁 هدیه عضویت</b> را بزن\n\nبا این کار، هم خودت و هم معرفت هدیه می‌گیرید! 💰";
+                sendmessage($from_id, sprintf($rxWelcomeAlertTpl, $useraffiliates['username']), $keyboard, 'html');
+                $rxInviterRewardTpl = $datatextbot['dyn_referral_inviter_reward_alert'] ?? "<b>🎉 یک زیرمجموعه جدید!</b>\n\nکاربر <b>@%s</b> با لینک دعوت شما وارد ربات شد ✅\n\nبا خریدهای این کاربر، <b>سهم هدیه شما</b> به حسابت واریز می‌شه 🔥";
+                sendmessage($affiliatesid, sprintf($rxInviterRewardTpl, $username), $keyboard, 'html');
+                rxReferralGiftNotify(rxReferralGiftPayout($from_id));
             }
         } else {
             if (!is_numeric($affiliatesid) && preg_match('/^[A-Za-z0-9_-]{1,64}$/', (string)$affiliatesid) && strpos((string)$affiliatesid, 'manageuser_') !== 0) {
@@ -1020,23 +1012,8 @@ if ($shouldCheckChannel && !in_array($from_id, $admin_ids)) {
                         update("user", "Processing_value_four", "none", "id", $from_id);
                         return;
                     }
-                    $marzbanDiscountaffiliates = select("affiliates", "*", null, null, "select");
-                    $useraffiliates = select("user", "*", 'id', $affiliatesid, "select");
-                    $stmtGiftGuard = $pdo->prepare("UPDATE user SET affiliates = :affiliatesid WHERE id = :from_id AND (affiliates IS NULL OR affiliates = 0 OR affiliates = '')");
-                    $stmtGiftGuard->execute([':affiliatesid' => $affiliatesid, ':from_id' => $from_id]);
-                    if (function_exists('clearSelectCache')) {
-                        clearSelectCache('user');
-                    }
-                    if ($stmtGiftGuard->rowCount() > 0) {
-                        if ($marzbanDiscountaffiliates['Discount'] == "onDiscountaffiliates") {
-                            $Balance_add_user = $useraffiliates['Balance'] + $marzbanDiscountaffiliates['price_Discount'];
-                            update("user", "Balance", $Balance_add_user, "id", $affiliatesid);
-                            $addbalancediscount = number_format($marzbanDiscountaffiliates['price_Discount'], 0);
-                            $rxCommissionCreditedTpl = $datatextbot['dyn_referral_commission_credited'] ?? "🎁 مبلغ %s به موجودی شما از طرف زیر مجموعه با شناسه کاربری %s اضافه گردید.";
-                            sendmessage($affiliatesid, sprintf($rxCommissionCreditedTpl, $addbalancediscount, $from_id), null, 'html');
-                        }
-                        $addcountaffiliates = intval($useraffiliates['affiliatescount']) + 1;
-                        update("user", "affiliatescount", $addcountaffiliates, "id", $affiliatesid);
+                    if (rxReferralRegister($from_id, $affiliatesid) === 'registered') {
+                        rxReferralGiftNotify(rxReferralGiftPayout($from_id));
                     }
                     update("user", "Processing_value_four", "none", "id", $from_id);
                 }
@@ -1198,6 +1175,7 @@ if ($text == "version") {
     $stmt = $pdo->prepare("SELECT * FROM invoice WHERE id_user = '$from_id' AND (status = 'active' OR status = 'end_of_time' OR status = 'end_of_volume' OR status = 'sendedwarn' OR status = 'send_on_hold' OR status = 'disabled' OR status = 'disablebyadmin') ORDER BY time_sell DESC LIMIT $start_index, $items_per_page");
     $stmt->execute();
     $serviceRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $rxLabelDup = rxServiceListUserDuplicateKeys($from_id, ['active', 'end_of_time', 'end_of_volume', 'sendedwarn', 'send_on_hold', 'disabled', 'disablebyadmin'], $setting['statusnamecustom'] == 'onnamecustom');
     if ($setting['statusnamecustom'] == 'onnamecustom') {
         foreach ($serviceRows as $row) {
             $data = "";
@@ -1205,7 +1183,7 @@ if ($text == "version") {
                 $data = " | {$row['note']}";
             $keyboardlists['inline_keyboard'][] = [
                 [
-                    'text' => "✨" . $row['username'] . $data . rxServiceListStatusSuffix($row) . "✨",
+                    'text' => "✨" . rxServiceListLabel($row, $rxLabelDup, true) . $data . rxServiceListStatusSuffix($row) . "✨",
                     'callback_data' => "quickview_" . $row['id_invoice']
                 ],
             ];
@@ -1214,7 +1192,7 @@ if ($text == "version") {
         foreach ($serviceRows as $row) {
             $keyboardlists['inline_keyboard'][] = [
                 [
-                    'text' => "✨" . $row['username'] . rxServiceListStatusSuffix($row) . "✨",
+                    'text' => "✨" . rxServiceListLabel($row, $rxLabelDup, false) . rxServiceListStatusSuffix($row) . "✨",
                     'callback_data' => "quickview_" . $row['id_invoice']
                 ],
             ];
@@ -1261,6 +1239,7 @@ if ($text == "version") {
     $stmt = $pdo->prepare("SELECT * FROM invoice WHERE id_user = '$from_id' AND (status = 'active' OR status = 'end_of_time' OR status = 'end_of_volume' OR status = 'sendedwarn' OR status = 'send_on_hold' OR status = 'disabled' OR status = 'disablebyadmin') ORDER BY time_sell DESC LIMIT $start_index, $items_per_page");
     $stmt->execute();
     $serviceRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $rxLabelDup = rxServiceListUserDuplicateKeys($from_id, ['active', 'end_of_time', 'end_of_volume', 'sendedwarn', 'send_on_hold', 'disabled', 'disablebyadmin'], $setting['statusnamecustom'] == 'onnamecustom');
     if ($setting['statusnamecustom'] == 'onnamecustom') {
         foreach ($serviceRows as $row) {
             $data = "";
@@ -1268,7 +1247,7 @@ if ($text == "version") {
                 $data = " | {$row['note']}";
             $keyboardlists['inline_keyboard'][] = [
                 [
-                    'text' => "✨" . $row['username'] . $data . rxServiceListStatusSuffix($row) . "✨",
+                    'text' => "✨" . rxServiceListLabel($row, $rxLabelDup, true) . $data . rxServiceListStatusSuffix($row) . "✨",
                     'callback_data' => "quickview_" . $row['id_invoice']
                 ],
             ];
@@ -1277,7 +1256,7 @@ if ($text == "version") {
         foreach ($serviceRows as $row) {
             $keyboardlists['inline_keyboard'][] = [
                 [
-                    'text' => "✨" . $row['username'] . rxServiceListStatusSuffix($row) . "✨",
+                    'text' => "✨" . rxServiceListLabel($row, $rxLabelDup, false) . rxServiceListStatusSuffix($row) . "✨",
                     'callback_data' => "quickview_" . $row['id_invoice']
                 ],
             ];
@@ -1324,6 +1303,7 @@ if ($text == "version") {
     $stmt = $pdo->prepare("SELECT * FROM invoice WHERE id_user = '$from_id' AND (status = 'active' OR status = 'end_of_time' OR status = 'end_of_volume' OR status = 'sendedwarn' OR status = 'send_on_hold' OR status = 'disabled' OR status = 'disablebyadmin') ORDER BY time_sell DESC LIMIT $previous_page, $items_per_page");
     $stmt->execute();
     $serviceRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $rxLabelDup = rxServiceListUserDuplicateKeys($from_id, ['active', 'end_of_time', 'end_of_volume', 'sendedwarn', 'send_on_hold', 'disabled', 'disablebyadmin'], $setting['statusnamecustom'] == 'onnamecustom');
     if ($setting['statusnamecustom'] == 'onnamecustom') {
         foreach ($serviceRows as $row) {
             $data = "";
@@ -1331,7 +1311,7 @@ if ($text == "version") {
                 $data = " | {$row['note']}";
             $keyboardlists['inline_keyboard'][] = [
                 [
-                    'text' => "✨" . $row['username'] . $data . rxServiceListStatusSuffix($row) . "✨",
+                    'text' => "✨" . rxServiceListLabel($row, $rxLabelDup, true) . $data . rxServiceListStatusSuffix($row) . "✨",
                     'callback_data' => "quickview_" . $row['id_invoice']
                 ],
             ];
@@ -1340,7 +1320,7 @@ if ($text == "version") {
         foreach ($serviceRows as $row) {
             $keyboardlists['inline_keyboard'][] = [
                 [
-                    'text' => "✨" . $row['username'] . rxServiceListStatusSuffix($row) . "✨",
+                    'text' => "✨" . rxServiceListLabel($row, $rxLabelDup, false) . rxServiceListStatusSuffix($row) . "✨",
                     'callback_data' => "quickview_" . $row['id_invoice']
                 ],
             ];
@@ -1616,6 +1596,7 @@ if ($text == "version") {
         $keyboardlists = [
             'inline_keyboard' => [],
         ];
+        $rxLabelDup = rxServiceListUserDuplicateKeys($from_id, ['active', 'end_of_time', 'end_of_volume', 'sendedwarn', 'send_on_hold', 'disabled', 'disablebyadmin'], $setting['statusnamecustom'] == 'onnamecustom');
         if ($setting['statusnamecustom'] == 'onnamecustom') {
             while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
                 $data = "";
@@ -1623,7 +1604,7 @@ if ($text == "version") {
                     $data = " | {$row['note']}";
                 $keyboardlists['inline_keyboard'][] = [
                     [
-                        'text' => "✨" . $row['username'] . $data . rxServiceListStatusSuffix($row) . "✨",
+                        'text' => "✨" . rxServiceListLabel($row, $rxLabelDup, true) . $data . rxServiceListStatusSuffix($row) . "✨",
                         'callback_data' => "quickview_" . $row['id_invoice']
                     ],
                 ];
@@ -1632,7 +1613,7 @@ if ($text == "version") {
             while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
                 $keyboardlists['inline_keyboard'][] = [
                     [
-                        'text' => "✨" . $row['username'] . rxServiceListStatusSuffix($row) . "✨",
+                        'text' => "✨" . rxServiceListLabel($row, $rxLabelDup, false) . rxServiceListStatusSuffix($row) . "✨",
                         'callback_data' => "quickview_" . $row['id_invoice']
                     ],
                 ];
@@ -2115,10 +2096,10 @@ $nameconfig";
             $textconnect = "📶 اخرین زمان اتصال شما : $lastonline";
         }
         $rwChangelinkHint = (($marzban['type'] ?? '') != "remnawave") ? "💡 برای قطع دسترسی دیگران کافیست روی گزینه \"تغییر لینک\" کلیک کنید." : "";
-        $textinfo_tpl = $datatextbot['text_service_detail'] ?? "📊وضعیت سرویس : {status}
-👤 نام سرویس : <code>{username}</code>
+        $textinfo_tpl = $datatextbot['text_service_detail'] ?? "🗂 نام سرویس : {product}
+📊وضعیت سرویس : {status}
 🌍 موقعیت سرویس :{location}
-🗂 نام محصول :{product}
+👤 شناسه سرویس : <code>{username}</code>
 
 🔋 ترافیک : {traffic}
 📥 حجم مصرفی : {used}

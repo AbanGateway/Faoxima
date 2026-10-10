@@ -1,4 +1,4 @@
-import { call } from './api.js?v=0.0.52';
+import { call } from './api.js?v=0.0.53';
 import { applyMode, getUserMode } from './theme.js?v=0.0.52';
 
 

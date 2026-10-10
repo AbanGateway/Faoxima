@@ -1,6 +1,6 @@
 import { hapticImpact, hapticNotify } from '../telegram.js?v=0.0.52';
 import { icon } from '../icons.js?v=0.0.52';
-import { call } from '../api.js?v=0.0.52';
+import { call } from '../api.js?v=0.0.53';
 import { getToken } from '../state.js';
 import { toast } from '../utils.js?v=0.0.52';
 import { applyBrand } from '../brand.js?v=0.0.52';

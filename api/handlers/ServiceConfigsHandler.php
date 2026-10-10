@@ -24,9 +24,29 @@ final class ServiceConfigsHandler extends BaseHandler
             FaoximaResponse::notFound('Service not found');
         }
 
-        $payload = $svcHandler->buildPayloadFromInvoice($invoice);
+        $requestedType = ServiceHandler::normalizeClientType(FaoximaInput::nullableString($this->data, 'client_type') ?? 'links');
+        $payload = $svcHandler->buildPayloadFromInvoice($invoice, $requestedType);
         if ($payload === null) {
             FaoximaResponse::fail(502, 'Service data unavailable');
+        }
+
+        if ($requestedType !== 'links') {
+            $documents = ServiceHandler::clientDocumentsFromPayload($payload, $requestedType);
+            if (!empty($documents)) {
+                $filenames = [];
+                foreach ($documents as $i => $document) {
+                    $filenames[] = ServiceHandler::clientDocumentFilename($requestedType, (int)$i, count($documents));
+                }
+                FaoximaResponse::ok([
+                    'username'              => (string)($payload['username'] ?? $username),
+                    'configs'               => $documents,
+                    'filenames'             => $filenames,
+                    'subscription_url'      => (string)($payload['subscription_url'] ?? ''),
+                    'count'                 => count($documents),
+                    'client_type'           => $requestedType,
+                    'requested_client_type' => $requestedType,
+                ]);
+            }
         }
 
 
@@ -63,6 +83,8 @@ final class ServiceConfigsHandler extends BaseHandler
             'configs'          => array_values(array_unique($configs)),
             'subscription_url' => (string)($payload['subscription_url'] ?? ''),
             'count'            => count(array_values(array_unique($configs))),
+            'client_type'           => 'links',
+            'requested_client_type' => $requestedType,
         ]);
     }
 

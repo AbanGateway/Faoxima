@@ -811,7 +811,7 @@ class ManagePanel
         }
         return $Output;
     }
-    function DataUser($name_panel, $username)
+    function DataUser($name_panel, $username, $client_type = 'links')
     {
         $Output = array();
         global $pdo, $domainhosts;
@@ -933,9 +933,11 @@ class ManagePanel
                     $pasarguardExpireTs = is_numeric($UsernameData['expire']) ? (int) $UsernameData['expire'] : (int) strtotime((string) $UsernameData['expire']);
                 }
                 $pasarguardLinks = [];
-                $pasarguardLinksResponse = pasarguardGetSubscriptionLinks($username, $Get_Data_Panel['name_panel']);
+                $pasarguardClientType = 'links';
+                $pasarguardLinksResponse = pasarguardGetSubscriptionLinks($username, $Get_Data_Panel['name_panel'], $client_type);
                 if (empty($pasarguardLinksResponse['error']) && !empty($pasarguardLinksResponse['links'])) {
                     $pasarguardLinks = $pasarguardLinksResponse['links'];
+                    $pasarguardClientType = (string) ($pasarguardLinksResponse['client_type'] ?? 'links');
                 }
                 $Output = array(
                     'status' => $UsernameData['status'],
@@ -951,7 +953,8 @@ class ManagePanel
                     'uuid' => $UsernameData['proxies'] ?? null,
                     'data_limit_reset' => $UsernameData['data_limit_reset_strategy'],
                     'hwid_limit' => $UsernameData['hwid_limit'] ?? null,
-                    'group_ids' => $UsernameData['group_ids'] ?? null
+                    'group_ids' => $UsernameData['group_ids'] ?? null,
+                    'client_type' => $pasarguardClientType
                 );
             }
         } elseif ($Get_Data_Panel['type'] == "guard") {

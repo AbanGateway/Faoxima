@@ -1,4 +1,4 @@
-import { call } from '../api.js?v=0.0.52';
+import { call } from '../api.js?v=0.0.53';
 import { fmtPrice, escapeHtml, skeletonList, toast, serviceStatusBadge } from '../utils.js?v=0.0.52';
 import { setUser } from '../state.js';
 import { icon } from '../icons.js?v=0.0.52';

@@ -5,7 +5,7 @@ const cfg = window.__APP_CONFIG__ || {};
 const API_URL = cfg.apiUrl || '/api';
 
 
-export async function configFileUrl(username, index = 0) {
+export async function configFileUrl(username, index = 0, clientType = '') {
     let dlToken = null;
     try {
         const res = await call('config_dl_token');
@@ -23,6 +23,9 @@ export async function configFileUrl(username, index = 0) {
         i: String(index),
         dl_token: dlToken,
     });
+    if (clientType && clientType !== 'links') {
+        qs.set('client_type', String(clientType));
+    }
     const base = /^https?:\/\//i.test(API_URL) ? API_URL : `${location.origin}${API_URL}`;
     return `${base}/miniapp.php?${qs.toString()}`;
 }

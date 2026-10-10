@@ -1,4 +1,4 @@
-import { call, ApiError, configFileUrl } from '../api.js?v=0.0.52';
+import { call, ApiError, configFileUrl } from '../api.js?v=0.0.53';
 import { downloadFromUrl, downloadBlob, dataUriToBlob, decodeDataUriText, isTelegramApp, tgPlatform } from '../download.js?v=0.0.52';
 import {
     escapeHtml, fmtPrice, fmtGb, fmtBytes, fmtIpLimit, skeletonList, copyToClipboard, toast, trafficPercent, serviceStatusBadge, blobToDataUrl,
@@ -95,8 +95,8 @@ function configName(c, i) {
     return 'کانفیگ ' + (i + 1);
 }
 
-async function serverDownload(username, index, name) {
-    const url = await configFileUrl(username, index);
+async function serverDownload(username, index, name, clientType = '') {
+    const url = await configFileUrl(username, index, clientType);
     if (!url) {
         return false;
     }
@@ -896,6 +896,12 @@ function renderBody($body, info, username, reload) {
             : shownOutputs.map((o) => renderOutput({ ...o, isManual: isManual || isStock })).join('');
     }
 
+    const hasLinkConfigs = outputs.some((o) => String(o?.type || '').toLowerCase() === 'config');
+    if (String(info.panel_type || '') === 'pasarguard' && !isStock && hasLinkConfigs && !disabled.has('config')) {
+        $cfgHost.insertAdjacentHTML('beforeend', clientFormatCardHtml());
+        bindClientFormatCard($cfgHost, username);
+    }
+
     bindConfigList($body);
     $body.querySelectorAll('.copy-btn').forEach((btn) => {
         btn.addEventListener('click', async (ev) => {
@@ -970,6 +976,107 @@ function handleAction(actionId, info, username, $body, reload, btn) {
     }
 }
 
+
+const CLIENT_FORMATS = [
+    { id: 'xray', label: 'Xray (JSON)' },
+    { id: 'sing_box', label: 'sing-box (JSON)' },
+    { id: 'clash_meta', label: 'Clash Meta (YAML)' },
+];
+const CLIENT_FORMAT_KEY = 'fx_client_format';
+
+function defaultClientFormat() {
+    try {
+        const saved = localStorage.getItem(CLIENT_FORMAT_KEY);
+        if (CLIENT_FORMATS.some((f) => f.id === saved)) return saved;
+    } catch (_) {}
+    const platform = String(tgPlatform() || '').toLowerCase();
+    return (platform === 'ios' || platform === 'macos') ? 'sing_box' : 'xray';
+}
+
+function clientFormatCardHtml() {
+    const selected = defaultClientFormat();
+    return `
+        <div class="sub-card" data-client-format-card>
+            <p class="section-title">${icon('fileText')} کانفیگ کامل برنامه</p>
+            <p class="muted" style="font-size:12px;margin:0 0 8px">فایل کامل تنظیمات (شامل DNS و مسیریابی پنل) را برای برنامه موردنظر دریافت کنید.</p>
+            <div style="display:flex;gap:8px;align-items:center">
+                <select data-client-format style="flex:1 1 auto;min-width:0;background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:11px 12px;font:inherit">
+                    ${CLIENT_FORMATS.map((f) => `<option value="${f.id}" ${f.id === selected ? 'selected' : ''}>${escapeHtml(f.label)}</option>`).join('')}
+                </select>
+                <button type="button" class="btn btn-ghost" data-client-format-fetch style="white-space:nowrap">${icon('download', 'class="ico ico-sm"')} دریافت</button>
+            </div>
+            <div data-client-format-result style="margin-top:8px"></div>
+        </div>
+    `;
+}
+
+function bindClientFormatCard($host, username) {
+    const $card = $host.querySelector('[data-client-format-card]');
+    if (!$card) return;
+    const $select = $card.querySelector('[data-client-format]');
+    const $fetch = $card.querySelector('[data-client-format-fetch]');
+    const $result = $card.querySelector('[data-client-format-result]');
+    let documents = [];
+    let names = [];
+    let loadedType = '';
+
+    $select.addEventListener('change', () => {
+        try { localStorage.setItem(CLIENT_FORMAT_KEY, $select.value); } catch (_) {}
+        $result.innerHTML = '';
+        documents = [];
+        names = [];
+        loadedType = '';
+    });
+
+    $fetch.addEventListener('click', async () => {
+        const clientType = $select.value;
+        if (!CLIENT_FORMATS.some((f) => f.id === clientType)) return;
+        $fetch.disabled = true;
+        $result.innerHTML = `<div class="muted center mono" style="font-size:12px;padding:6px 0">در حال دریافت…</div>`;
+        try {
+            const res = await call('service_configs', { params: { username, client_type: clientType } });
+            const obj = res?.obj || {};
+            if (obj.client_type !== clientType || !Array.isArray(obj.configs) || obj.configs.length === 0) {
+                $result.innerHTML = `<div class="muted center" style="font-size:12px;padding:6px 0">این فرمت از پنل دریافت نشد؛ از لینک‌ها یا لینک اشتراک بالا استفاده کنید.</div>`;
+                return;
+            }
+            documents = obj.configs.map((c) => String(c || ''));
+            names = documents.map((_, i) => String((Array.isArray(obj.filenames) && obj.filenames[i]) || `config-${i + 1}.txt`));
+            loadedType = clientType;
+            $result.innerHTML = documents.map((_, i) => `
+                <div style="display:flex;gap:6px;margin-top:6px">
+                    <button type="button" class="btn btn-ghost" data-client-doc-download="${i}" style="flex:1 1 auto">${icon('download', 'class="ico ico-sm"')} ${escapeHtml(names[i])}</button>
+                    <button type="button" class="btn btn-ghost" data-client-doc-copy="${i}" aria-label="کپی">${icon('copy', 'class="ico ico-sm"')}</button>
+                </div>
+            `).join('');
+        } catch (err) {
+            $result.innerHTML = `<div class="muted center" style="font-size:12px;padding:6px 0">${escapeHtml(err && err.message ? err.message : 'خطا در دریافت')}</div>`;
+        } finally {
+            $fetch.disabled = false;
+        }
+    });
+
+    $result.addEventListener('click', async (ev) => {
+        const dl = ev.target.closest('[data-client-doc-download]');
+        const cp = ev.target.closest('[data-client-doc-copy]');
+        if (!dl && !cp) return;
+        ev.preventDefault();
+        const i = parseInt((dl || cp).getAttribute(dl ? 'data-client-doc-download' : 'data-client-doc-copy'), 10) || 0;
+        const doc = documents[i];
+        if (!doc) return;
+        try { hapticImpact('light'); } catch (_) {}
+        if (cp) {
+            const ok = await copyToClipboard(doc);
+            toast(ok ? 'کپی شد' : 'خطا در کپی', ok ? 'success' : 'error');
+            return;
+        }
+        if (isTelegramApp()) {
+            const served = await serverDownload(username, i, names[i], loadedType);
+            if (served) return;
+        }
+        await triggerBlobDownload(new Blob([doc], { type: 'application/octet-stream' }), names[i], doc);
+    });
+}
 
 function closeOpenConfigDetail(btn) {
     try {

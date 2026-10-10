@@ -38,7 +38,7 @@ async function watchResumePage(view, encodedOrderId) {
     let paymentStatus = '';
     let statusObj = {};
     try {
-        const statusResp = await import('./api.js?v=0.0.52').then(m => m.call('payment_status', { params: { order_id: orderId } }));
+        const statusResp = await import('./api.js?v=0.0.53').then(m => m.call('payment_status', { params: { order_id: orderId } }));
         const obj = statusResp?.obj || {};
         statusObj = obj;
         methodStr = String(obj.method || '').toLowerCase();
@@ -161,7 +161,7 @@ function loadServicePage() {
 
 
     const url = new URL('./pages/service.js', import.meta.url);
-    url.searchParams.set('v', `${ver}-0.0.56`);
+    url.searchParams.set('v', `${ver}-0.0.57`);
     _serviceModulePromise = import(url.href).catch((err) => {
 
 

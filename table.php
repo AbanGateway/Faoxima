@@ -1576,7 +1576,27 @@ try {
 
 📆 {date_now} → ⏰ {time_now}
                     ";
-    $text_service_detail = "📊وضعیت سرویس : {status}
+    $text_service_detail = "🗂 نام سرویس : {product}
+📊وضعیت سرویس : {status}
+🌍 موقعیت سرویس :{location}
+👤 شناسه سرویس : <code>{username}</code>
+
+🔋 ترافیک : {traffic}
+📥 حجم مصرفی : {used}
+💢 حجم باقی مانده : {remaining} ({percent}%)
+
+📅 تاریخ اتمام : {expire_date} ({days_left})";
+    $text_service_detail_previous = "🗂 نام سرویس : {product}
+📊وضعیت سرویس : {status}
+🌍 موقعیت سرویس :{location}
+
+🔋 ترافیک : {traffic}
+📥 حجم مصرفی : {used}
+💢 حجم باقی مانده : {remaining} ({percent}%)
+
+📅 تاریخ اتمام : {expire_date} ({days_left})
+🆔 شناسه سرویس : <code>{username}</code>";
+    $text_service_detail_legacy = "📊وضعیت سرویس : {status}
 👤 نام سرویس : <code>{username}</code>
 🌍 موقعیت سرویس :{location}
 🗂 نام محصول :{product}
@@ -2131,6 +2151,10 @@ try {
                 "✅ گزارش تراکنش #شارژ_کیف_پول\n\n<blockquote>👤 آیدی کاربر : <code>{user_id}</code></blockquote>\n<blockquote>📦 مقدار : {amount} تومان</blockquote>\n<blockquote>💰 مبلغ پرداختی : {price} تومان</blockquote>\n\n📅 : {date} - ⏰ : {time}",
                 ["💳 شارژ کیف پول\n\n<blockquote>👤 آیدی کاربر : <code>{user_id}</code></blockquote>\n<blockquote>📦 مقدار : {amount} تومان</blockquote>\n<blockquote>⏰ زمان : {when}</blockquote>\n<blockquote>💰 مبلغ پرداختی : {price} تومان</blockquote>"],
             ],
+        ];
+        $rxPublicLogDefaults['text_service_detail'] = [
+            $text_service_detail,
+            [$text_service_detail_legacy, str_replace("\r\n", "\n", $text_service_detail_legacy), $text_service_detail_previous, str_replace("\r\n", "\n", $text_service_detail_previous)],
         ];
         foreach ($rxPublicLogDefaults as $rxKey => $rxPair) {
             $rxKeyEsc = $connect->real_escape_string($rxKey);

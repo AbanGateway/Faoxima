@@ -1263,133 +1263,26 @@ $text_porsant
 
     sendmessage($from_id, $textaffiliates, $keyboard_share, 'HTML');
 } elseif ($datain == "get_gift_start") {
-    $gift_status = select("affiliates", "*", null, null, "select");
-    if ($gift_status['Discount'] == "offDiscountaffiliates") {
+    $rxGiftResult = rxReferralGiftPayout($from_id);
+    $rxGiftStatus = (string) ($rxGiftResult['status'] ?? 'failed');
+    if ($rxGiftStatus === 'paid') {
+        rxReferralGiftNotify($rxGiftResult);
+    } elseif ($rxGiftStatus === 'disabled' || $rxGiftStatus === 'no_amount') {
         sendmessage($from_id, $datatextbot['dyn_affiliates_extra_section_disabled'] ?? "📛 این بخش درحال حاضر غیرفعال می باشد", $keyboard, 'HTML');
-        return;
-    }
-    if (!userExists($user['affiliates'])) {
+    } elseif ($rxGiftStatus === 'not_referred') {
         sendmessage($from_id, $datatextbot['dyn_affiliates_extra_not_affiliate_of_anyone'] ?? "📛 شما زیرمجموعه هیچ کاربری نیستید.", $keyboard, 'HTML');
-        return;
-    }
-    $reagent = select("reagent_report", "*", "user_id", $from_id, "select", ['cache' => false]);
-    if (!$reagent) {
-        $affiliateId = intval($user['affiliates']);
-        if ($affiliateId && userExists($affiliateId)) {
-            $stmt = $pdo->prepare("INSERT INTO reagent_report (user_id, get_gift, time, reagent)
-                                   VALUES (:user_id, :get_gift, :time, :reagent)
-                                   ON DUPLICATE KEY UPDATE reagent = VALUES(reagent), get_gift = VALUES(get_gift), time = VALUES(time)");
-            $stmt->execute([
-                ':user_id' => $from_id,
-                ':get_gift' => 0,
-                ':time' => date('Y/m/d H:i:s'),
-                ':reagent' => $affiliateId,
-            ]);
-            if (function_exists('clearSelectCache')) {
-                clearSelectCache('reagent_report');
-            }
-            $reagent = select("reagent_report", "*", "user_id", $from_id, "select", ['cache' => false]);
-        }
-        if (!$reagent) {
-            sendmessage($from_id, $datatextbot['dyn_affiliates_extra_not_affiliate_of_anyone'] ?? "📛 شما زیرمجموعه هیچ کاربری نیستید.", $keyboard, 'HTML');
-            return;
-        }
-    }
-    if (!empty($reagent['get_gift'])) {
+    } elseif ($rxGiftStatus === 'already') {
         sendmessage($from_id, $datatextbot['dyn_affiliates_extra_gift_already_received'] ?? "<b>⛔ شما قبلاً هدیه عضویت را دریافت کرده‌اید.</b>\nاین هدیه فقط <b>یک‌بار</b> قابل فعال‌سازی است.", $keyboard, 'HTML');
-        return;
-    }
-    $affiliatesGate = select("affiliates", "*", null, null, "select");
-    if (($affiliatesGate['require_phone_verified'] ?? '') === 'on_require_phone' && ($user['number'] ?? 'none') !== 'confrim number by admin') {
+    } elseif ($rxGiftStatus === 'phone_required') {
         sendmessage($from_id, $datatextbot['dyn_affiliates_extra_phone_required'] ?? "📞 برای دریافت هدیه عضویت، ابتدا باید شماره موبایل خود را تایید کنید.", $keyboard, 'HTML');
-        return;
-    }
-    $minAgeHours = (int) ($affiliatesGate['min_account_age_hours'] ?? 0);
-    if ($minAgeHours > 0 && !empty($user['register']) && $user['register'] !== 'none') {
-        $accountAgeHours = (time() - (int) $user['register']) / 3600;
-        if ($accountAgeHours < $minAgeHours) {
-            sendmessage($from_id, $datatextbot['dyn_affiliates_extra_account_too_new'] ?? "⏳ حساب شما هنوز به اندازه کافی قدیمی نیست، کمی بعد دوباره تلاش کنید.", $keyboard, 'HTML');
-            return;
-        }
-    }
-    $referrerIdForCap = $reagent['reagent'];
-    $dailyCap = (int) ($affiliatesGate['daily_referral_cap'] ?? 0);
-    $monthlyCap = (int) ($affiliatesGate['monthly_referral_cap'] ?? 0);
-    if ($dailyCap > 0 || $monthlyCap > 0) {
-        if ($dailyCap > 0) {
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM affiliate_referral_claims WHERE reagent = :reagent AND claim_date = :today");
-            $stmt->execute([':reagent' => $referrerIdForCap, ':today' => date('Y-m-d')]);
-            if ((int) $stmt->fetchColumn() >= $dailyCap) {
-                sendmessage($from_id, $datatextbot['dyn_affiliates_extra_cap_reached'] ?? "📛 سقف روزانه هدیه معرفی برای این معرف پر شده است.", $keyboard, 'HTML');
-                return;
-            }
-        }
-        if ($monthlyCap > 0) {
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM affiliate_referral_claims WHERE reagent = :reagent AND claim_date >= :monthstart");
-            $stmt->execute([':reagent' => $referrerIdForCap, ':monthstart' => date('Y-m-01')]);
-            if ((int) $stmt->fetchColumn() >= $monthlyCap) {
-                sendmessage($from_id, $datatextbot['dyn_affiliates_extra_cap_reached'] ?? "📛 سقف ماهانه هدیه معرفی برای این معرف پر شده است.", $keyboard, 'HTML');
-                return;
-            }
-        }
-    }
-    $stmt = $pdo->prepare("UPDATE reagent_report SET get_gift = 1 WHERE user_id = :user_id AND get_gift = 0");
-    $stmt->execute([':user_id' => $from_id]);
-    if ($stmt->rowCount() === 0) {
-        sendmessage($from_id, $datatextbot['dyn_affiliates_extra_gift_already_received'] ?? "<b>⛔ شما قبلاً هدیه عضویت را دریافت کرده‌اید.</b>\nاین هدیه فقط <b>یک‌بار</b> قابل فعال‌سازی است.", $keyboard, 'HTML');
-        return;
-    }
-    $claimStmt = $pdo->prepare("INSERT IGNORE INTO affiliate_referral_claims (reagent, invitee_id, claim_type, claim_date, time) VALUES (:reagent, :invitee_id, 'start_gift', :claim_date, :time)");
-    $claimStmt->execute([
-        ':reagent' => $referrerIdForCap,
-        ':invitee_id' => $from_id,
-        ':claim_date' => date('Y-m-d'),
-        ':time' => date('Y/m/d H:i:s'),
-    ]);
-    $reagent['get_gift'] = true;
-    $price_gift_Start = select("affiliates", "*", null, null, "select");
-    $price_gift_Start = intval($price_gift_Start['price_Discount']) / 2;
-    $useraffiliates = select("user", "*", 'id', $reagent['reagent'], "select");
-    if (function_exists('balance_atomic_credit') && $price_gift_Start > 0) {
-        $__giftOkRef = balance_atomic_credit($reagent['reagent'], $price_gift_Start);
-        if ($__giftOkRef && function_exists('wallet_ledger_record')) {
-            wallet_ledger_record($reagent['reagent'], 'credit', $price_gift_Start, 'referral_gift', 'هدیه عضویت زیرمجموعه', null, 'user', (string)$from_id);
-        }
-        $__giftOkUser = balance_atomic_credit($from_id, $price_gift_Start);
-        if ($__giftOkUser && function_exists('wallet_ledger_record')) {
-            wallet_ledger_record($from_id, 'credit', $price_gift_Start, 'referral_gift', 'هدیه عضویت', null, 'user', (string)$reagent['reagent']);
-        }
+    } elseif ($rxGiftStatus === 'too_new') {
+        sendmessage($from_id, $datatextbot['dyn_affiliates_extra_account_too_new'] ?? "⏳ حساب شما هنوز به اندازه کافی قدیمی نیست، کمی بعد دوباره تلاش کنید.", $keyboard, 'HTML');
+    } elseif ($rxGiftStatus === 'cap_daily') {
+        sendmessage($from_id, $datatextbot['dyn_affiliates_extra_cap_reached'] ?? "📛 سقف روزانه هدیه معرفی برای این معرف پر شده است.", $keyboard, 'HTML');
+    } elseif ($rxGiftStatus === 'cap_monthly') {
+        sendmessage($from_id, $datatextbot['dyn_affiliates_extra_cap_reached'] ?? "📛 سقف ماهانه هدیه معرفی برای این معرف پر شده است.", $keyboard, 'HTML');
     } else {
-        $Balance_add_regent = $useraffiliates['Balance'] + $price_gift_Start;
-        update("user", "Balance", $Balance_add_regent, "id", $reagent['reagent']);
-        $Balance_add_user = $user['Balance'] + $price_gift_Start;
-        update("user", "Balance", $Balance_add_user, "id", $from_id);
-    }
-    $Balance_add_regent = select("user", "Balance", "id", $reagent['reagent'], "select", ['cache' => false])['Balance'] ?? ($useraffiliates['Balance'] + $price_gift_Start);
-    $Balance_add_user = select("user", "Balance", "id", $from_id, "select", ['cache' => false])['Balance'] ?? ($user['Balance'] + $price_gift_Start);
-    $addbalancediscount = number_format($price_gift_Start, 0);
-    sendmessage($reagent['reagent'], $datatextbot['dyn_affiliates_extra_gift_credited_inviter'] ?? "🎉 یک نفر با معرفی شما وارد شد! هدیه به حساب شما واریز شد.", null, 'html');
-    sendmessage($from_id, $datatextbot['dyn_affiliates_extra_gift_activated'] ?? "🎉 هدیه عضویت برای شما فعال شد!", null, 'html');
-    $rxFmtUserBalanceBefore = rxFormatToman($user['Balance']);
-    $rxFmtUserBalanceAfter = rxFormatToman($Balance_add_user);
-    $rxFmtReagentBalanceBefore = rxFormatToman($useraffiliates['Balance']);
-    $rxFmtReagentBalanceAfter = rxFormatToman($Balance_add_regent);
-    $report_join_gift = "🎁 پرداخت هدیه عضویت
-<blockquote> -آیدی عددی : $from_id</blockquote>
-<blockquote> - نام کاربری : @$username</blockquote>
-<blockquote> - آیدی عددی معرف : {$reagent['reagent']}</blockquote>
-<blockquote> - موجودی زیرمجموعه قبل از هدیه : {$rxFmtUserBalanceBefore}</blockquote>
-<blockquote> - موجودی زیرمجموعه بعد از هدیه : {$rxFmtUserBalanceAfter}</blockquote>
-<blockquote>  - موجودی معرف قبل از هدیه : {$rxFmtReagentBalanceBefore}</blockquote>
-<blockquote> - موجودی معرف بعد از هدیه : {$rxFmtReagentBalanceAfter}</blockquote>
- ";
-    if (strlen($setting['Channel_Report'] ?? '') > 0) {
-        telegram('sendmessage', [
-            'chat_id' => $setting['Channel_Report'],
-            'message_thread_id' => $porsantreport,
-            'text' => $report_join_gift,
-            'parse_mode' => "HTML"
-        ]);
+        sendmessage($from_id, $datatextbot['dyn_affiliates_extra_gift_failed'] ?? "⚠️ پرداخت هدیه عضویت در حال حاضر انجام نشد؛ لطفاً چند لحظه دیگر دوباره تلاش کنید.", $keyboard, 'HTML');
     }
 } elseif (preg_match('/Extra_volumes_(\w+)_(.*)/', $datain, $dataget)) {
     $usernamepanel = $dataget[1];
@@ -1885,6 +1778,7 @@ $text_porsant
     $keyboardlists = [
         'inline_keyboard' => [],
     ];
+    $rxLabelDup = rxServiceListUserDuplicateKeys($from_id, ['active', 'end_of_time', 'end_of_volume', 'sendedwarn', 'send_on_hold'], (bool) $statusnote);
     if ($statusnote) {
         while ($row = mysqli_fetch_assoc($result)) {
             $data = "";
@@ -1892,7 +1786,7 @@ $text_porsant
                 $data = " | {$row['note']}";
             $keyboardlists['inline_keyboard'][] = [
                 [
-                    'text' => "✨" . $row['username'] . $data . "✨",
+                    'text' => "✨" . rxServiceListLabel($row, $rxLabelDup, true) . $data . "✨",
                     'callback_data' => "extend_" . $row['id_invoice']
                 ],
             ];
@@ -1901,7 +1795,7 @@ $text_porsant
         while ($row = mysqli_fetch_assoc($result)) {
             $keyboardlists['inline_keyboard'][] = [
                 [
-                    'text' => "✨" . $row['username'] . "✨",
+                    'text' => "✨" . rxServiceListLabel($row, $rxLabelDup, false) . "✨",
                     'callback_data' => "extend_" . $row['id_invoice']
                 ],
             ];
@@ -1945,6 +1839,7 @@ $text_porsant
     $keyboardlists = [
         'inline_keyboard' => [],
     ];
+    $rxLabelDup = rxServiceListUserDuplicateKeys($from_id, ['active', 'end_of_time', 'end_of_volume', 'sendedwarn', 'send_on_hold'], (bool) $statusnote);
     if ($statusnote) {
         while ($row = mysqli_fetch_assoc($result)) {
             $data = "";
@@ -1952,7 +1847,7 @@ $text_porsant
                 $data = " | {$row['note']}";
             $keyboardlists['inline_keyboard'][] = [
                 [
-                    'text' => "✨" . $row['username'] . $data . "✨",
+                    'text' => "✨" . rxServiceListLabel($row, $rxLabelDup, true) . $data . "✨",
                     'callback_data' => "extend_" . $row['id_invoice']
                 ],
             ];
@@ -1961,7 +1856,7 @@ $text_porsant
         while ($row = mysqli_fetch_assoc($result)) {
             $keyboardlists['inline_keyboard'][] = [
                 [
-                    'text' => "✨" . $row['username'] . "✨",
+                    'text' => "✨" . rxServiceListLabel($row, $rxLabelDup, false) . "✨",
                     'callback_data' => "extend_" . $row['id_invoice']
                 ],
             ];
@@ -2006,6 +1901,7 @@ $text_porsant
     $keyboardlists = [
         'inline_keyboard' => [],
     ];
+    $rxLabelDup = rxServiceListUserDuplicateKeys($from_id, ['active', 'end_of_time', 'end_of_volume', 'sendedwarn', 'send_on_hold'], (bool) $statusnote);
     if ($statusnote) {
         while ($row = mysqli_fetch_assoc($result)) {
             $data = "";
@@ -2013,7 +1909,7 @@ $text_porsant
                 $data = " | {$row['note']}";
             $keyboardlists['inline_keyboard'][] = [
                 [
-                    'text' => "✨" . $row['username'] . $data . "✨",
+                    'text' => "✨" . rxServiceListLabel($row, $rxLabelDup, true) . $data . "✨",
                     'callback_data' => "extend_" . $row['id_invoice']
                 ],
             ];
@@ -2022,7 +1918,7 @@ $text_porsant
         while ($row = mysqli_fetch_assoc($result)) {
             $keyboardlists['inline_keyboard'][] = [
                 [
-                    'text' => "✨" . $row['username'] . "✨",
+                    'text' => "✨" . rxServiceListLabel($row, $rxLabelDup, false) . "✨",
                     'callback_data' => "extend_" . $row['id_invoice']
                 ],
             ];

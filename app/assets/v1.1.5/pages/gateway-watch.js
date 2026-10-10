@@ -1,4 +1,4 @@
-import { call } from '../api.js?v=0.0.52';
+import { call } from '../api.js?v=0.0.53';
 import { escapeHtml, toast } from '../utils.js?v=0.0.52';
 import { icon } from '../icons.js?v=0.0.52';
 import { hapticImpact, hapticNotify, isDesktopPlatform } from '../telegram.js?v=0.0.52';

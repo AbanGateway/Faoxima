@@ -206,8 +206,119 @@ function pasarguardGetUser($username_account, $location)
     return pasarguardRequest($panel, 'GET', '/api/user/' . $username_account);
 }
 
-function pasarguardGetSubscriptionLinks($username_account, $location)
+function pasarguardSubscriptionClientTypes()
 {
+    return ['links', 'xray', 'sing_box', 'clash_meta'];
+}
+
+function pasarguardNormalizeClientType($client_type)
+{
+    $clientType = strtolower(trim((string) $client_type));
+    return in_array($clientType, pasarguardSubscriptionClientTypes(), true) ? $clientType : 'links';
+}
+
+function pasarguardIsJsonClientConfig($config)
+{
+    if (!is_array($config) || $config === [] || array_keys($config) === range(0, count($config) - 1)) {
+        return false;
+    }
+    return isset($config['outbounds']) && is_array($config['outbounds']) && $config['outbounds'] !== [];
+}
+
+function pasarguardParseClientDocuments($clientType, $body)
+{
+    $body = trim((string) $body);
+    if ($body === '') {
+        return [];
+    }
+    if ($clientType === 'xray' || $clientType === 'sing_box') {
+        $decoded = json_decode($body, true);
+        if (!is_array($decoded) || json_last_error() !== JSON_ERROR_NONE) {
+            return [];
+        }
+        $isList = array_keys($decoded) === range(0, count($decoded) - 1);
+        $items = $isList ? $decoded : [$decoded];
+        if ($clientType === 'sing_box' && count($items) !== 1) {
+            return [];
+        }
+        $documents = [];
+        foreach ($items as $item) {
+            if (!pasarguardIsJsonClientConfig($item)) {
+                return [];
+            }
+            $encoded = json_encode($item, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (!is_string($encoded)) {
+                return [];
+            }
+            $documents[] = $encoded;
+        }
+        return $documents;
+    }
+    if ($clientType === 'clash_meta') {
+        if ($body[0] === '{' || $body[0] === '[' || preg_match('#^[a-z][a-z0-9+.\-]*://#i', $body)) {
+            return [];
+        }
+        if (!preg_match('/^proxies\s*:/m', $body)) {
+            return [];
+        }
+        return [$body];
+    }
+    return [];
+}
+
+function pasarguardFetchSubscription($url, $accept)
+{
+    $cfgTimeout = isset($GLOBALS['setting']['panel_curl_timeout']) ? (int) $GLOBALS['setting']['panel_curl_timeout'] : 0;
+    $timeout = $cfgTimeout > 0 ? $cfgTimeout : 20;
+    $connectTimeout = max(6, (int) round($timeout * 0.4));
+    $verifyTls = defined('BOT_CURL_VERIFY_TLS') && BOT_CURL_VERIFY_TLS === true;
+    $body = false;
+    $httpCode = 0;
+    $error = '';
+    for ($attempt = 1; $attempt <= 2; $attempt++) {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_HTTPGET, true);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $connectTimeout);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+        curl_setopt($ch, CURLOPT_ENCODING, '');
+        curl_setopt($ch, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['accept: ' . $accept]);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, $verifyTls);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, $verifyTls ? 2 : 0);
+        if (function_exists('faoxima_apply_curl_proxy')) {
+            faoxima_apply_curl_proxy($ch, 'panel');
+        }
+        $body = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $errno = curl_errno($ch);
+        $error = $errno ? curl_error($ch) : '';
+        curl_close($ch);
+        if ($errno === CURLE_OPERATION_TIMEDOUT && $attempt < 2) {
+            continue;
+        }
+        break;
+    }
+    if ($error !== '' || $httpCode === 0 || $httpCode >= 500) {
+        $host = (string) parse_url($url, PHP_URL_HOST);
+        $message = sprintf('PasarGuard subscription fetch to host %s failed (HTTP %d%s)', $host, $httpCode, $error !== '' ? ', curl error' : '');
+        if (function_exists('faoxima_dedup_error_log')) {
+            faoxima_dedup_error_log('pgsub|' . $host . '|' . $httpCode . '|' . ($error !== '' ? 1 : 0), $message);
+        } else {
+            error_log($message);
+        }
+    }
+    $result = ['status' => $httpCode, 'body' => is_string($body) ? $body : ''];
+    if ($error !== '') {
+        $result['error'] = 'curl_error';
+    }
+    return $result;
+}
+
+function pasarguardGetSubscriptionLinks($username_account, $location, $client_type = 'links')
+{
+    $requestedType = pasarguardNormalizeClientType($client_type);
     $userResponse = pasarguardGetUser($username_account, $location);
     if (!empty($userResponse['error'])) {
         return $userResponse;
@@ -223,17 +334,44 @@ function pasarguardGetSubscriptionLinks($username_account, $location)
     if ($panel === null) {
         return ["error" => "Panel configuration not found for the requested location."];
     }
-    $subUrl = rtrim($panel['url_panel'], '/') . '/' . ltrim($userData['subscription_url'], '/');
-    $req = new CurlRequest(rtrim($subUrl, '/') . '/links');
-    $req->setHeaders(['accept: text/plain']);
-    $response = $req->get();
+    $subscriptionPath = (string) $userData['subscription_url'];
+    $subUrl = preg_match('#^https?://#i', $subscriptionPath)
+        ? $subscriptionPath
+        : rtrim($panel['url_panel'], '/') . '/' . ltrim($subscriptionPath, '/');
+    $subUrl = rtrim($subUrl, '/');
+    $fallbackReason = null;
+    if ($requestedType !== 'links') {
+        $response = pasarguardFetchSubscription(
+            $subUrl . '/' . $requestedType,
+            $requestedType === 'clash_meta' ? 'text/yaml, text/plain;q=0.9, */*;q=0.1' : 'application/json, text/plain;q=0.9, */*;q=0.1'
+        );
+        if (!empty($response['error']) || empty($response['status']) || $response['status'] >= 400) {
+            $fallbackReason = 'http_' . (int) ($response['status'] ?? 0);
+        } else {
+            $documents = pasarguardParseClientDocuments($requestedType, $response['body'] ?? '');
+            if (!empty($documents)) {
+                return [
+                    "status" => true,
+                    "links" => $documents,
+                    "client_type" => $requestedType,
+                    "requested_client_type" => $requestedType,
+                ];
+            }
+            $fallbackReason = 'invalid_format';
+        }
+    }
+    $response = pasarguardFetchSubscription($subUrl . '/links', 'text/plain');
     if (!empty($response['error']) || empty($response['status']) || $response['status'] >= 400) {
         return ["error" => "Unable to fetch subscription links."];
     }
     $links = array_values(array_filter(array_map('trim', explode("\n", (string) $response['body'])), function ($line) {
         return $line !== '';
     }));
-    return ["status" => true, "links" => $links];
+    $result = ["status" => true, "links" => $links, "client_type" => 'links', "requested_client_type" => $requestedType];
+    if ($fallbackReason !== null) {
+        $result['fallback_reason'] = $fallbackReason;
+    }
+    return $result;
 }
 
 function pasarguardGetUsersByStatus($location, $status)

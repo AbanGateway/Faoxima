@@ -1,4 +1,4 @@
-import { call, callForm, callBlob } from '../api.js?v=0.0.52';
+import { call, callForm, callBlob } from '../api.js?v=0.0.53';
 import { escapeHtml, skeletonList, toast, fmtNumber, copyToClipboard, blobToDataUrl } from '../utils.js?v=0.0.52';
 import { icon } from '../icons.js?v=0.0.52';
 import { showBackButton } from '../telegram.js?v=0.0.52';

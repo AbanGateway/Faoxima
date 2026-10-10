@@ -1,4 +1,4 @@
-import { call } from '../api.js?v=0.0.52';
+import { call } from '../api.js?v=0.0.53';
 import {
     escapeHtml, fmtPrice, fmtGb, fmtDays, fmtIpLimit, fmtSymbolicLimit, skeletonList, emptyState, toast, fmtNumber,
 } from '../utils.js?v=0.0.52';

@@ -441,6 +441,25 @@ if (is_file($rxLegacyLoopbackFlag)) {
 
 $dueTasks = [];
 $rxSuccessfulDispatches = 0;
+$rxSkippedMissingScripts = 0;
+
+$rxCronScriptExists = static function (string $script): bool {
+    $script = ltrim($script, '/');
+    if ($script === '' || strpos($script, '..') !== false) {
+        return false;
+    }
+    return is_file(__DIR__ . '/../cronbot/' . $script);
+};
+
+$rxReportMissingCronScript = static function (string $key, string $script): void {
+    $script = ltrim($script, '/');
+    $marker = rtrim(sys_get_temp_dir(), '/' . DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'faoxima_cron_missing_' . md5(__DIR__ . '|' . $key . '|' . $script);
+    if (is_file($marker) && (time() - (int) @filemtime($marker)) < 86400) {
+        return;
+    }
+    @touch($marker);
+    error_log(sprintf('[cron] skipped job "%s": script cronbot/%s does not exist', $key, $script));
+};
 
 $rxMarkJobRun = static function (PDO $pdo, string $key, int $now, array &$runtimeState) : void {
     if (function_exists('setCronJobLastRun')) {
@@ -507,6 +526,12 @@ if ($bootstrapLoaded && function_exists('getCronJobDefinitions')) {
 
     foreach ($definitions as $key => $definition) {
         if (empty($definition['script'])) {
+            continue;
+        }
+
+        if (!$rxCronScriptExists((string) $definition['script'])) {
+            $rxSkippedMissingScripts++;
+            $rxReportMissingCronScript((string) $key, (string) $definition['script']);
             continue;
         }
 
@@ -626,7 +651,10 @@ if ($bootstrapLoaded && function_exists('getCronJobDefinitions')) {
         }
     }
 
-    if (!in_array('index.php', $definedScripts, true)) {
+    if (!in_array('index.php', $definedScripts, true) && !$rxCronScriptExists('index.php')) {
+        $rxSkippedMissingScripts++;
+        $rxReportMissingCronScript('__index__', 'index.php');
+    } elseif (!in_array('index.php', $definedScripts, true)) {
         $indexDispatched = false;
 
         if ($rxIsCli) {
@@ -710,5 +738,5 @@ if (!$rxIsCli && !empty($dueTasks)) {
 }
 
 $rxDispatchedTotal = $rxSuccessfulDispatches;
-echo "OK " . date('Y-m-d H:i:s') . " (Asia/Tehran) | dispatched=" . $rxDispatchedTotal . "\n";
+echo "OK " . date('Y-m-d H:i:s') . " (Asia/Tehran) | dispatched=" . $rxDispatchedTotal . ($rxSkippedMissingScripts > 0 ? " | skipped_missing=" . $rxSkippedMissingScripts : '') . "\n";
 
