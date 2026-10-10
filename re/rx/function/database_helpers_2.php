@@ -2874,7 +2874,9 @@ function outputlunk($text)
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $text);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT_MS, 6000);
+    $timeoutInfo = function_exists('faoxima_panel_timeout_info') ? faoxima_panel_timeout_info() : ['timeout' => 20, 'connect_timeout' => 8];
+    curl_setopt($ch, CURLOPT_TIMEOUT, (int) $timeoutInfo['timeout']);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, (int) $timeoutInfo['connect_timeout']);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
     curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
@@ -2895,6 +2897,9 @@ function outputlunksub($url)
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, "$url/info");
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    $timeoutInfo = function_exists('faoxima_panel_timeout_info') ? faoxima_panel_timeout_info() : ['timeout' => 20, 'connect_timeout' => 8];
+    curl_setopt($ch, CURLOPT_TIMEOUT, (int) $timeoutInfo['timeout']);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, (int) $timeoutInfo['connect_timeout']);
     $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
     curl_setopt($ch, CURLOPT_USERAGENT, $userAgent);
     curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'GET');

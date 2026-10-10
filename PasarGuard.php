@@ -424,16 +424,102 @@ function pasarguardParseClientDocuments($clientType, $body)
     return [];
 }
 
+function pasarguardMaskSegment($segment)
+{
+    $segment = (string) $segment;
+    if ($segment === '') {
+        return '';
+    }
+    if (preg_match('/^[A-Za-z_\-]{1,16}$/', $segment)) {
+        return $segment;
+    }
+    return '[redacted:' . strlen($segment) . ']';
+}
+
+function pasarguardSanitizeUrl($url)
+{
+    $url = trim((string) $url);
+    if ($url === '') {
+        return '';
+    }
+    $parts = parse_url($url);
+    if (!is_array($parts) || empty($parts['host'])) {
+        return '[unparsable-url]';
+    }
+    $out = strtolower((string) ($parts['scheme'] ?? 'http')) . '://' . strtolower((string) $parts['host']);
+    if (!empty($parts['port'])) {
+        $out .= ':' . (int) $parts['port'];
+    }
+    $out .= pasarguardSanitizePath((string) ($parts['path'] ?? ''));
+    if (isset($parts['query']) && $parts['query'] !== '') {
+        $out .= '?[redacted]';
+    }
+    return $out;
+}
+
+function pasarguardSanitizePath($path)
+{
+    $path = (string) $path;
+    if ($path === '') {
+        return '';
+    }
+    return implode('/', array_map('pasarguardMaskSegment', explode('/', $path)));
+}
+
+function pasarguardTruncate($text, $limit)
+{
+    $text = (string) $text;
+    $limit = max(16, (int) $limit);
+    if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+        return mb_strlen($text, 'UTF-8') > $limit ? mb_substr($text, 0, $limit, 'UTF-8') . '...' : $text;
+    }
+    return strlen($text) > $limit ? substr($text, 0, $limit) . '...' : $text;
+}
+
+function pasarguardSanitizeText($text, $limit = 300)
+{
+    $text = (string) $text;
+    if ($text === '') {
+        return '';
+    }
+    if (!preg_match('//u', $text)) {
+        $text = function_exists('mb_convert_encoding') ? (string) mb_convert_encoding($text, 'UTF-8', 'UTF-8') : (string) preg_replace('/[\x80-\xFF]/', '?', $text);
+    }
+    $text = (string) preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
+    $text = (string) preg_replace_callback('#\b([a-z][a-z0-9+.\-]{1,24})://[^\s"\'<>`]+#i', function ($match) {
+        $scheme = strtolower($match[1]);
+        if ($scheme === 'http' || $scheme === 'https') {
+            return pasarguardSanitizeUrl($match[0]);
+        }
+        return '[' . $scheme . '-link redacted]';
+    }, $text);
+    $text = (string) preg_replace('/\beyJ[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]{4,}(?:\.[A-Za-z0-9_\-]*)?/', '[jwt redacted]', $text);
+    $text = (string) preg_replace('/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i', '[uuid redacted]', $text);
+    $text = (string) preg_replace('/((?:password|passwd|pass|secret|token|access_token|refresh_token|api[_-]?key|authorization|x-api-key|private[_-]?key|pre[_-]?shared[_-]?key|psk|sid|subscription_url|sub_url)["\']?\s*[:=]\s*["\']?)(?:Bearer\s+)?[^\s"\'&,;}]+/i', '$1[redacted]', $text);
+    $text = (string) preg_replace_callback('/(?<![A-Za-z0-9])[A-Za-z0-9+\/_\-]{20,}={0,2}/', function ($match) {
+        return (preg_match('/[0-9]/', $match[0]) && preg_match('/[A-Za-z]/', $match[0])) || strlen($match[0]) >= 40 ? '[blob redacted]' : $match[0];
+    }, $text);
+    $text = (string) preg_replace('/\s+/u', ' ', $text);
+    return pasarguardTruncate(trim($text), $limit);
+}
+
 function pasarguardFetchSubscription($url, $accept)
 {
-    $cfgTimeout = isset($GLOBALS['setting']['panel_curl_timeout']) ? (int) $GLOBALS['setting']['panel_curl_timeout'] : 0;
-    $timeout = $cfgTimeout > 0 ? $cfgTimeout : 20;
-    $connectTimeout = max(6, (int) round($timeout * 0.4));
+    $timeoutInfo = faoxima_panel_timeout_info();
+    $timeout = (int) $timeoutInfo['timeout'];
+    $connectTimeout = (int) $timeoutInfo['connect_timeout'];
     $verifyTls = defined('BOT_CURL_VERIFY_TLS') && BOT_CURL_VERIFY_TLS === true;
     $body = false;
     $httpCode = 0;
+    $errno = 0;
     $error = '';
+    $contentType = '';
+    $redirectUrl = '';
+    $redirectCount = 0;
+    $durationMs = 0;
+    $attempts = 0;
     for ($attempt = 1; $attempt <= 2; $attempt++) {
+        $attempts = $attempt;
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_HTTPGET, true);
@@ -445,55 +531,167 @@ function pasarguardFetchSubscription($url, $accept)
         curl_setopt($ch, CURLOPT_HTTPHEADER, ['accept: ' . $accept]);
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, $verifyTls);
         curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, $verifyTls ? 2 : 0);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
+        if (defined('CURLOPT_REDIR_PROTOCOLS') && defined('CURLPROTO_HTTP') && defined('CURLPROTO_HTTPS')) {
+            @curl_setopt($ch, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+        }
         if (function_exists('faoxima_apply_curl_proxy')) {
             faoxima_apply_curl_proxy($ch, 'panel');
         }
+        $startedAt = microtime(true);
         $body = curl_exec($ch);
+        $durationMs = (int) round((microtime(true) - $startedAt) * 1000);
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $errno = curl_errno($ch);
-        $error = $errno ? curl_error($ch) : '';
+        $errno = (int) curl_errno($ch);
+        $error = $errno ? (string) curl_error($ch) : '';
+        $contentType = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+        $redirectCount = (int) curl_getinfo($ch, CURLINFO_REDIRECT_COUNT);
+        $effectiveUrl = (string) curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
+        $pendingRedirect = (string) curl_getinfo($ch, CURLINFO_REDIRECT_URL);
         curl_close($ch);
+        $redirectUrl = $pendingRedirect !== '' ? $pendingRedirect : ($redirectCount > 0 ? $effectiveUrl : '');
         if ($errno === CURLE_OPERATION_TIMEDOUT && $attempt < 2) {
             continue;
         }
         break;
     }
-    if ($error !== '' || $httpCode === 0 || $httpCode >= 500) {
+    $bodyText = is_string($body) ? $body : '';
+    $emptyBody = trim($bodyText) === '';
+    if ($error !== '' || $httpCode === 0 || $httpCode >= 400 || ($httpCode >= 200 && $httpCode < 300 && $emptyBody)) {
         $host = (string) parse_url($url, PHP_URL_HOST);
-        $message = sprintf('PasarGuard subscription fetch to host %s failed (HTTP %d%s)', $host, $httpCode, $error !== '' ? ', curl error' : '');
+        $message = sprintf(
+            'PasarGuard subscription fetch to host %s failed (HTTP %d%s%s)',
+            $host,
+            $httpCode,
+            $errno ? ', curl errno ' . $errno . ': ' . pasarguardSanitizeText($error, 160) : '',
+            ($httpCode >= 200 && $httpCode < 300 && $emptyBody) ? ', empty body' : ''
+        );
         if (function_exists('faoxima_dedup_error_log')) {
-            faoxima_dedup_error_log('pgsub|' . $host . '|' . $httpCode . '|' . ($error !== '' ? 1 : 0), $message);
+            faoxima_dedup_error_log('pgsub|' . $host . '|' . $httpCode . '|' . $errno . '|' . ($emptyBody ? 1 : 0), $message);
         } else {
             error_log($message);
         }
     }
-    $result = ['status' => $httpCode, 'body' => is_string($body) ? $body : ''];
+    $result = [
+        'status' => $httpCode,
+        'body' => $bodyText,
+        'content_type' => $contentType,
+        'size' => strlen($bodyText),
+        'duration_ms' => $durationMs,
+        'attempts' => $attempts,
+        'errno' => $errno,
+        'redirect_count' => $redirectCount,
+    ];
+    if ($redirectUrl !== '') {
+        $result['redirect_url'] = $redirectUrl;
+    }
     if ($error !== '') {
-        $result['error'] = 'curl_error';
+        $result['error'] = 'cURL error ' . $errno . ': ' . pasarguardSanitizeText($error, 200);
     }
     return $result;
 }
 
-function pasarguardGetSubscriptionLinks($username_account, $location, $client_type = 'links')
+function pasarguardParseLinksBody($body, $contentType = '')
+{
+    $result = [
+        'links' => [],
+        'entries' => 0,
+        'rejected' => 0,
+        'rejected_reasons' => [],
+        'format' => 'plain',
+        'invalid_reason' => null,
+    ];
+    $text = trim((string) $body);
+    if ($text === '') {
+        $result['format'] = 'empty';
+        return $result;
+    }
+    if ($text[0] === '<' || stripos((string) $contentType, 'text/html') !== false) {
+        $result['format'] = 'html';
+        $result['invalid_reason'] = 'html_response';
+        return $result;
+    }
+    if (($text[0] === '{' || $text[0] === '[') && json_decode($text, true) !== null) {
+        $result['format'] = 'json';
+        $result['invalid_reason'] = 'json_response';
+        return $result;
+    }
+    if (strpos($text, '://') === false) {
+        $compact = rtrim(strtr((string) preg_replace('/\s+/', '', $text), '-_', '+/'), '=');
+        $compact .= str_repeat('=', (4 - strlen($compact) % 4) % 4);
+        $decoded = base64_decode($compact, true);
+        if (is_string($decoded) && strpos($decoded, '://') !== false) {
+            $text = trim($decoded);
+            $result['format'] = 'base64';
+        }
+    }
+    foreach (preg_split('/\r\n|\n|\r/', $text) as $line) {
+        $line = trim((string) $line);
+        if ($line === '') {
+            continue;
+        }
+        $result['entries']++;
+        $reason = null;
+        if (!preg_match('//u', $line)) {
+            $reason = 'invalid_utf8';
+        } elseif (!preg_match('#^[a-z][a-z0-9+.\-]*://\S#i', $line)) {
+            $reason = 'missing_scheme';
+        }
+        if ($reason !== null) {
+            $result['rejected']++;
+            $result['rejected_reasons'][$reason] = ($result['rejected_reasons'][$reason] ?? 0) + 1;
+            continue;
+        }
+        $result['links'][] = $line;
+    }
+    if ($result['entries'] === 0) {
+        $result['format'] = 'empty';
+    } elseif (empty($result['links'])) {
+        $result['invalid_reason'] = 'no_valid_entries';
+    }
+    return $result;
+}
+
+function pasarguardGetSubscriptionLinks($username_account, $location, $client_type = 'links', $prefetchedUser = null)
 {
     $requestedType = pasarguardNormalizeClientType($client_type);
-    $userResponse = pasarguardGetUser($username_account, $location);
-    if (!empty($userResponse['error'])) {
-        return $userResponse;
-    }
-    if (empty($userResponse['body'])) {
-        return ["error" => "Empty response from panel when resolving subscription url."];
-    }
-    $userData = json_decode($userResponse['body'], true);
-    if (!is_array($userData) || empty($userData['subscription_url'])) {
-        return ["error" => "Unable to resolve subscription url."];
-    }
+    $fail = function ($stage, $reason, $message, array $extra = []) {
+        return array_merge($extra, [
+            'error' => $message,
+            'stage' => $stage,
+            'reason' => $reason,
+            'outcome' => $extra['outcome'] ?? 'failed',
+        ]);
+    };
     $panel = findPasarGuardPanelByName($location);
     if ($panel === null) {
-        return ["error" => "Panel configuration not found for the requested location."];
+        return $fail('panel', 'panel_not_found', 'Panel configuration not found for the requested location.');
     }
-    $subscriptionPath = (string) $userData['subscription_url'];
-    $subUrl = preg_match('#^https?://#i', $subscriptionPath)
+    $userResponse = is_array($prefetchedUser) ? $prefetchedUser : pasarguardGetUser($username_account, $location);
+    $userStatus = (int) ($userResponse['status'] ?? 0);
+    $userBody = is_string($userResponse['body'] ?? null) ? $userResponse['body'] : '';
+    $userData = $userBody !== '' ? json_decode($userBody, true) : null;
+    $userJsonValid = is_array($userData);
+    $hasSubscriptionUrl = $userJsonValid && is_string($userData['subscription_url'] ?? null) && trim($userData['subscription_url']) !== '';
+    if (!empty($userResponse['error'])) {
+        return $fail('user_lookup', 'request_error', (string) $userResponse['error'], ['http_status' => $userStatus]);
+    }
+    if ($userBody === '') {
+        return $fail('user_lookup', 'empty_body', 'Empty response from panel when resolving subscription url.', ['http_status' => $userStatus]);
+    }
+    if ($userStatus === 0 || $userStatus >= 400) {
+        return $fail('user_lookup', 'http_' . $userStatus, 'Unable to resolve subscription url.', ['http_status' => $userStatus]);
+    }
+    if (!$userJsonValid) {
+        return $fail('user_lookup', 'invalid_json', 'Unable to resolve subscription url.', ['http_status' => $userStatus]);
+    }
+    if (!$hasSubscriptionUrl) {
+        return $fail('user_lookup', 'missing_subscription_url', 'Unable to resolve subscription url.', ['http_status' => $userStatus]);
+    }
+    $subscriptionPath = trim((string) $userData['subscription_url']);
+    $absolute = (bool) preg_match('#^https?://#i', $subscriptionPath);
+    $subUrl = $absolute
         ? $subscriptionPath
         : rtrim($panel['url_panel'], '/') . '/' . ltrim($subscriptionPath, '/');
     $subUrl = rtrim($subUrl, '/');
@@ -503,8 +701,8 @@ function pasarguardGetSubscriptionLinks($username_account, $location, $client_ty
             $subUrl . '/' . $requestedType,
             $requestedType === 'clash_meta' ? 'text/yaml, text/plain;q=0.9, */*;q=0.1' : 'application/json, text/plain;q=0.9, */*;q=0.1'
         );
-        if (!empty($response['error']) || empty($response['status']) || $response['status'] >= 400) {
-            $fallbackReason = 'http_' . (int) ($response['status'] ?? 0);
+        if (!empty($response['error']) || empty($response['status']) || $response['status'] >= 300) {
+            $fallbackReason = !empty($response['errno']) ? 'curl_' . (int) $response['errno'] : 'http_' . (int) ($response['status'] ?? 0);
         } else {
             $documents = pasarguardParseClientDocuments($requestedType, $response['body'] ?? '');
             if (!empty($documents)) {
@@ -513,19 +711,44 @@ function pasarguardGetSubscriptionLinks($username_account, $location, $client_ty
                     "links" => $documents,
                     "client_type" => $requestedType,
                     "requested_client_type" => $requestedType,
+                    "outcome" => 'ok',
                 ];
             }
-            $fallbackReason = 'invalid_format';
+            $fallbackReason = trim((string) ($response['body'] ?? '')) === '' ? 'empty_body' : 'invalid_format';
         }
     }
     $response = pasarguardFetchSubscription($subUrl . '/links', 'text/plain');
-    if (!empty($response['error']) || empty($response['status']) || $response['status'] >= 400) {
-        return ["error" => "Unable to fetch subscription links."];
+    $fetchStatus = (int) ($response['status'] ?? 0);
+    $fetchExtra = ['http_status' => $fetchStatus];
+    if ($fallbackReason !== null) {
+        $fetchExtra['fallback_reason'] = $fallbackReason;
     }
-    $links = array_values(array_filter(array_map('trim', explode("\n", (string) $response['body'])), function ($line) {
-        return $line !== '';
-    }));
-    $result = ["status" => true, "links" => $links, "client_type" => 'links', "requested_client_type" => $requestedType];
+    if (!empty($response['error']) || $fetchStatus === 0) {
+        $reason = !empty($response['errno']) ? 'curl_' . (int) $response['errno'] : 'http_0';
+        return $fail('subscription_fetch', $reason, 'Unable to fetch subscription links.', $fetchExtra + ['curl_errno' => (int) ($response['errno'] ?? 0)]);
+    }
+    if ($fetchStatus >= 400) {
+        return $fail('subscription_fetch', 'http_' . $fetchStatus, 'Unable to fetch subscription links.', $fetchExtra);
+    }
+    if ($fetchStatus >= 300) {
+        return $fail('subscription_fetch', 'unfollowed_redirect', 'Unable to fetch subscription links.', $fetchExtra);
+    }
+    $parsed = pasarguardParseLinksBody($response['body'] ?? '', $response['content_type'] ?? '');
+    if ($parsed['invalid_reason'] !== null) {
+        return $fail('parse', $parsed['invalid_reason'], 'Subscription content did not contain usable configuration links.', $fetchExtra + ['outcome' => 'invalid']);
+    }
+    $outcome = empty($parsed['links']) ? 'empty' : 'ok';
+    $result = [
+        "status" => true,
+        "links" => $parsed['links'],
+        "client_type" => 'links',
+        "requested_client_type" => $requestedType,
+        "outcome" => $outcome,
+    ];
+    if ($outcome === 'empty') {
+        $result['stage'] = 'parse';
+        $result['reason'] = 'empty_body';
+    }
     if ($fallbackReason !== null) {
         $result['fallback_reason'] = $fallbackReason;
     }
@@ -840,4 +1063,119 @@ function pasarguardRemoveUser($location, $username)
         return ["error" => "Panel configuration not found for the requested location."];
     }
     return pasarguardRequest($panel, 'DELETE', '/api/user/' . $username);
+}
+
+function pasarguardCapabilityReport(array $panel, array &$report)
+{
+    $authMode = pasarguardAuthMode($panel);
+    rx_cap_info($report, 'روش احراز هویت', $authMode === 'password' ? 'نام کاربری و رمز عبور' : 'کلید API');
+    if ($authMode === 'password') {
+        $username = trim((string) ($panel['username_panel'] ?? ''));
+        $password = trim((string) ($panel['password_panel'] ?? ''));
+        if ($username === '' || $password === '' || strtolower($username) === 'null' || strtolower($password) === 'null') {
+            rx_cap_set($report, 'connection', 'failed', 'نام کاربری یا رمز عبور برای این پنل تنظیم نشده است.');
+            rx_cap_mark_untested_after_connection_failure($report);
+            return;
+        }
+    } else {
+        $apiKey = trim((string) ($panel['api_key'] ?? ''));
+        if ($apiKey === '' || strtolower($apiKey) === 'null') {
+            rx_cap_set($report, 'connection', 'failed', 'کلید API برای این پنل تنظیم نشده است.');
+            rx_cap_mark_untested_after_connection_failure($report);
+            return;
+        }
+    }
+    $adminResponse = pasarguardRequest($panel, 'GET', '/api/admin');
+    $adminStatus = (int) ($adminResponse['status'] ?? 0);
+    $admin = rx_cap_json($adminResponse);
+    if (!empty($adminResponse['error']) || $adminStatus < 200 || $adminStatus >= 300 || $admin === null) {
+        $note = !empty($adminResponse['error'])
+            ? rx_cap_clean_text((string) $adminResponse['error'], 160)
+            : ($admin === null && $adminStatus >= 200 && $adminStatus < 300 ? 'پاسخ /api/admin JSON معتبر نبود.' : rx_cap_http_read($adminResponse)[1]);
+        rx_cap_set($report, 'connection', 'failed', $note);
+        rx_cap_mark_untested_after_connection_failure($report);
+        return;
+    }
+    rx_cap_set($report, 'connection', 'verified', 'GET /api/admin موفق بود.');
+    rx_cap_info($report, 'ادمین متصل', (string) ($admin['username'] ?? ''));
+    $perm = rx_cap_apply_marzban_family($report, $admin);
+
+    $listResponse = pasarguardRequest($panel, 'GET', '/api/users?limit=1');
+    $list = rx_cap_http_read($listResponse);
+    if ($list[0] === 'verified') {
+        $listData = rx_cap_json($listResponse);
+        $total = is_array($listData) && isset($listData['total']) ? (int) $listData['total'] : null;
+        $scope = $perm['actions']['list_users'][1] ?? null;
+        $list[1] = 'GET /api/users موفق بود' . ($total !== null ? '؛ تعداد قابل مشاهده: ' . $total : '') . ($scope === 'own' ? '؛ فقط کاربران متعلق به این ادمین.' : '.');
+    }
+    rx_cap_set($report, 'list_users', $list[0], $list[1]);
+
+    $candidates = rx_cap_sample_usernames($panel['name_panel'] ?? '');
+    $sampleResponse = null;
+    $sampleUser = null;
+    $lastRead = null;
+    foreach ($candidates as $candidate) {
+        $response = pasarguardRequest($panel, 'GET', '/api/user/' . rawurlencode($candidate));
+        $status = (int) ($response['status'] ?? 0);
+        if (empty($response['error']) && $status >= 200 && $status < 300) {
+            $sampleResponse = $response;
+            $sampleUser = $candidate;
+            break;
+        }
+        $lastRead = $response;
+        if ($status !== 404) {
+            break;
+        }
+    }
+    if (empty($candidates)) {
+        rx_cap_no_sample_user($report);
+    } elseif ($sampleResponse === null) {
+        $read = rx_cap_http_read(is_array($lastRead) ? $lastRead : []);
+        if ((int) ($lastRead['status'] ?? 0) === 404) {
+            $read = ['failed', 'هیچ‌کدام از ' . count($candidates) . ' کاربر نمونه در پنل یافت نشد (HTTP 404).'];
+        }
+        rx_cap_set($report, 'read_user', $read[0], $read[1]);
+        rx_cap_set($report, 'configs', 'not_tested', 'چون خواندن کاربر نمونه ناموفق بود، دریافت کانفیگ بررسی نشد.');
+    } else {
+        rx_cap_set($report, 'read_user', 'verified', 'کاربر نمونه ' . $sampleUser . ' خوانده شد؛ فقط دسترسی به همین کاربر تأیید شده است.');
+        $links = pasarguardGetSubscriptionLinks($sampleUser, $panel['name_panel'], 'links', $sampleResponse);
+        $outcome = (string) ($links['outcome'] ?? (!empty($links['error']) ? 'failed' : 'ok'));
+        if ($outcome === 'ok' && !empty($links['links'])) {
+            rx_cap_set($report, 'configs', 'verified', count($links['links']) . ' کانفیگ از لینک اشتراک کاربر نمونه دریافت شد.');
+        } elseif ($outcome === 'empty') {
+            rx_cap_set($report, 'configs', 'unknown', 'درخواست اشتراک موفق بود اما پنل برای کاربر نمونه کانفیگی تولید نکرد (پاسخ خالی).');
+        } else {
+            $stage = (string) ($links['stage'] ?? '');
+            $reason = (string) ($links['reason'] ?? '');
+            $denied = in_array((int) ($links['http_status'] ?? 0), [403], true);
+            rx_cap_set($report, 'configs', $denied ? 'denied' : 'failed', 'مرحله: ' . $stage . '، علت: ' . $reason);
+        }
+    }
+
+    $groupsResponse = pasarguardRequest($panel, 'GET', '/api/groups');
+    $groupsRead = rx_cap_http_read($groupsResponse);
+    if ($groupsRead[0] === 'verified') {
+        $groupsData = rx_cap_json($groupsResponse);
+        $groups = is_array($groupsData['groups'] ?? null) ? $groupsData['groups'] : (is_array($groupsData) && array_keys($groupsData) === range(0, count($groupsData) - 1) ? $groupsData : []);
+        $groupIds = [];
+        foreach ($groups as $group) {
+            if (is_array($group) && isset($group['id'])) {
+                $groupIds[] = (int) $group['id'];
+            }
+        }
+        $configured = json_decode((string) ($panel['inbounds'] ?? ''), true);
+        $configured = is_array($configured) ? array_values(array_map('intval', $configured)) : [];
+        $missing = array_values(array_diff($configured, $groupIds));
+        $note = 'GET /api/groups موفق بود؛ ' . count($groupIds) . ' گروه قابل مشاهده.';
+        if (!empty($configured)) {
+            $note .= empty($missing)
+                ? ' همه گروه‌های تنظیم‌شده در ربات موجودند.'
+                : ' گروه‌های تنظیم‌شده ناموجود یا خارج از دسترس: ' . implode(', ', $missing);
+        } else {
+            $note .= ' گروهی در تنظیمات ربات برای این پنل ثبت نشده است.';
+        }
+        rx_cap_set($report, 'resources', empty($missing) ? 'verified' : 'failed', $note);
+    } else {
+        rx_cap_set($report, 'resources', $groupsRead[0], 'GET /api/groups: ' . $groupsRead[1]);
+    }
 }

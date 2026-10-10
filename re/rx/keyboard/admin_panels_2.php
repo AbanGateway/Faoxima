@@ -487,11 +487,12 @@ function rebeccaKeyboardProtocolLabel($config){
     return null;
 }
 
-function keyboard_config($config_split,$id_invoice,$back_active = true,$page = 0){
+function keyboard_config($config_split,$id_invoice,$back_active = true,$page = 0,&$rowCount = null){
     global $textbotlang;
     $rxConfigPageSize = 5;
 
     $rows = [];
+    $config_split = is_array($config_split) ? $config_split : [];
     foreach (array_values($config_split) as $i => $config){
         if(!is_string($config) || $config === ''){
             error_log('Invalid configuration entry encountered while building keyboard');
@@ -598,7 +599,27 @@ function keyboard_config($config_split,$id_invoice,$back_active = true,$page = 0
     if($back_active){
     $keyboard_config['inline_keyboard'][] = [['text' => $textbotlang['users']['stateus']['backinfo'], 'callback_data' => "product_$id_invoice"]];
     }
-    return json_encode($keyboard_config);
+    $rowCount = $totalRows;
+    $encoded = json_encode($keyboard_config);
+    if ($encoded === false) {
+        error_log('keyboard_config json_encode failed: ' . json_last_error_msg());
+        $encoded = defined('JSON_INVALID_UTF8_SUBSTITUTE') ? json_encode($keyboard_config, JSON_INVALID_UTF8_SUBSTITUTE) : false;
+    }
+    return $encoded;
+}
+function keyboard_config_unavailable_text($dataUserOut, $outcomeOverride = null){
+    global $datatextbot;
+    $diagnostic = is_array($dataUserOut) && is_array($dataUserOut['links_diagnostic'] ?? null) ? $dataUserOut['links_diagnostic'] : [];
+    $outcome = $outcomeOverride !== null ? (string) $outcomeOverride : (string) ($diagnostic['outcome'] ?? 'failed');
+    $baseError = $datatextbot['dyn_errors_config_read_from_panel_error'] ?? "❌ خطا در خواندن کانفیگ از پنل.";
+    if ($outcome === 'empty') {
+        $message = "ℹ️ در حال حاضر پنل هیچ کانفیگی برای این سرویس ارائه نمی‌دهد.";
+    } elseif ($outcome === 'invalid') {
+        $message = $baseError . "\nپاسخ پنل شامل کانفیگ قابل استفاده نبود.";
+    } else {
+        $message = $baseError;
+    }
+    return $message;
 }
 $keyboard_buy = json_encode([
         'inline_keyboard' => [

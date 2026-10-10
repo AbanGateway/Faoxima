@@ -813,6 +813,7 @@ $optionMarzban = rx_finalizeInlineAdminKb(json_encode([
         [$rxAdminPanelBtn("🔄 تغییر نوع پنل", 'admin_panel_marzban')],
         [$rxAdminPanelBtn("✍️ نام پنل", 'admin_panel_marzban'), $rxAdminPanelBtn("❌ حذف پنل", 'admin_panel_marzban', 'danger')],
         [$rxAdminPanelBtn("🔐 ویرایش رمز عبور", 'admin_panel_marzban'), $rxAdminPanelBtn("👤 ویرایش نام", 'admin_panel_marzban')],
+        [$rxAdminPanelBtn("⁉️ اتصال به پنل", 'admin_panel_marzban')],
         [$rxAdminPanelBtn("🔗 ویرایش آدرس پنل", 'admin_panel_marzban'), $rxAdminPanelBtn("⚙️ پروتکل اینباند", 'admin_panel_marzban')],
         [$rxAdminPanelBtn("🔋 روش تمدید سرویس", 'admin_panel_marzban'), $rxAdminPanelBtn("💡 ساخت نام کاربری", 'admin_panel_marzban')],
         [$rxAdminPanelBtn("🚨 محدودیت اکانت", 'admin_panel_marzban'), $rxAdminPanelBtn("📍 تغییر گروه", 'admin_panel_marzban')],

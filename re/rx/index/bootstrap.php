@@ -2500,7 +2500,17 @@ $nameconfig";
             $DataUserOut['links'] = $remnaConfigs['links'];
         }
     }
-    Editmessagetext($from_id, $message_id, "📌 از لیست زیر یک کانفیگ را انتخاب استفاده نمایید.", keyboard_config($DataUserOut['links'], $id_invoice, true, $page));
+    if (count($DataUserOut['links']) === 0) {
+        sendmessage($from_id, keyboard_config_unavailable_text($DataUserOut), null, 'html');
+        return;
+    }
+    $configKeyboardRows = 0;
+    $configKeyboard = keyboard_config($DataUserOut['links'], $id_invoice, true, $page, $configKeyboardRows);
+    if ($configKeyboardRows === 0 || !is_string($configKeyboard)) {
+        sendmessage($from_id, keyboard_config_unavailable_text($DataUserOut, 'invalid'), null, 'html');
+        return;
+    }
+    Editmessagetext($from_id, $message_id, "📌 از لیست زیر یک کانفیگ را انتخاب استفاده نمایید.", $configKeyboard);
 } elseif (preg_match('/config_(\w+)/', $datain, $dataget) || (is_string($text) && strpos($text, "/link ") !== false)) {
     $textCommand = is_string($text) ? $text : '';
     if ($textCommand !== '' && $textCommand[0] === "/") {
@@ -2578,7 +2588,17 @@ $nameconfig";
             $DataUserOut['links'] = $remnaConfigs['links'];
         }
     }
-    Editmessagetext($from_id, $message_id, "📌 از لیست زیر یک کانفیگ را انتخاب استفاده نمایید.", keyboard_config($DataUserOut['links'], $nameloc['id_invoice']));
+    if (count($DataUserOut['links']) === 0) {
+        sendmessage($from_id, keyboard_config_unavailable_text($DataUserOut), null, 'html');
+        return;
+    }
+    $configKeyboardRows = 0;
+    $configKeyboard = keyboard_config($DataUserOut['links'], $nameloc['id_invoice'], true, 0, $configKeyboardRows);
+    if ($configKeyboardRows === 0 || !is_string($configKeyboard)) {
+        sendmessage($from_id, keyboard_config_unavailable_text($DataUserOut, 'invalid'), null, 'html');
+        return;
+    }
+    Editmessagetext($from_id, $message_id, "📌 از لیست زیر یک کانفیگ را انتخاب استفاده نمایید.", $configKeyboard);
 } elseif (preg_match('/configget_(.*)_(.*)/', $datain, $dataget)) {
     $id_invoice = $dataget[1];
     $nameloc = select("invoice", "*", "id_invoice", $id_invoice, "select");
@@ -2646,7 +2666,7 @@ $nameconfig";
         }
     }
     if (!isset($DataUserOut['links']) || !is_array($DataUserOut['links']) || count($DataUserOut['links']) === 0) {
-        sendmessage($from_id, $datatextbot['dyn_errors_config_read_from_panel_error'] ?? "❌ خطا در خواندن کانفیگ از پنل.", null, 'html');
+        sendmessage($from_id, keyboard_config_unavailable_text($DataUserOut), null, 'html');
         return;
     }
     $rwCgSel = $DataUserOut['links'][$dataget[2]] ?? '';

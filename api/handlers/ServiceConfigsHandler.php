@@ -95,12 +95,13 @@ final class ServiceConfigsHandler extends BaseHandler
             return [];
         }
 
+        $timeoutInfo = function_exists('faoxima_panel_timeout_info') ? faoxima_panel_timeout_info() : ['timeout' => 20, 'connect_timeout' => 8];
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_TIMEOUT        => 10,
-            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT        => (int) $timeoutInfo['timeout'],
+            CURLOPT_CONNECTTIMEOUT => (int) $timeoutInfo['connect_timeout'],
             CURLOPT_USERAGENT      => 'Faoxima-Mini/1.0',
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => 0,

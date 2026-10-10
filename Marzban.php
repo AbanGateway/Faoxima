@@ -812,3 +812,78 @@ function get_list_update($location,$username)
     });
     return $response;
 }
+
+function marzbanCapabilityGet(array $panel, $path)
+{
+    $token = token_panel($panel['code_panel']);
+    $tokenError = marzbanTokenError($token);
+    if ($tokenError !== null) {
+        return ['status' => 0, 'body' => '', 'error' => (string) ($tokenError['error'] ?? 'Marzban login failed')];
+    }
+    $url = rtrim((string) $panel['url_panel'], '/') . $path;
+    return marzbanSendAuthorized($panel['code_panel'], $token['access_token'] ?? null, function ($accessToken) use ($url) {
+        $req = new CurlRequest($url);
+        $req->setHeaders(['accept: application/json']);
+        $req->setBearerToken($accessToken);
+        return $req->get();
+    });
+}
+
+function marzbanCapabilityReport(array $panel, array &$report)
+{
+    $isV1 = (string) ($panel['version_panel'] ?? '0') === '1';
+    rx_cap_info($report, 'نسخه API', $isV1 ? 'v1 (گروه‌محور)' : 'کلاسیک');
+    $username = trim((string) ($panel['username_panel'] ?? ''));
+    $password = trim((string) ($panel['password_panel'] ?? ''));
+    if ($username === '' || $password === '') {
+        rx_cap_set($report, 'connection', 'failed', 'نام کاربری یا رمز عبور برای این پنل تنظیم نشده است.');
+        rx_cap_mark_untested_after_connection_failure($report);
+        return;
+    }
+    $adminResponse = marzbanCapabilityGet($panel, '/api/admin');
+    $adminStatus = (int) ($adminResponse['status'] ?? 0);
+    $admin = rx_cap_json($adminResponse);
+    if (!empty($adminResponse['error']) || $adminStatus < 200 || $adminStatus >= 300 || $admin === null) {
+        $note = !empty($adminResponse['error'])
+            ? rx_cap_clean_text((string) $adminResponse['error'], 160)
+            : ($admin === null && $adminStatus >= 200 && $adminStatus < 300 ? 'پاسخ /api/admin JSON معتبر نبود.' : rx_cap_http_read($adminResponse)[1]);
+        rx_cap_set($report, 'connection', 'failed', $note);
+        rx_cap_mark_untested_after_connection_failure($report);
+        return;
+    }
+    rx_cap_set($report, 'connection', 'verified', 'ورود و GET /api/admin موفق بود.');
+    rx_cap_info($report, 'ادمین متصل', (string) ($admin['username'] ?? ''));
+    $perm = rx_cap_apply_marzban_family($report, $admin);
+
+    $listResponse = marzbanCapabilityGet($panel, '/api/users?limit=1');
+    $list = rx_cap_http_read($listResponse);
+    if ($list[0] === 'verified') {
+        $listData = rx_cap_json($listResponse);
+        $total = is_array($listData) && isset($listData['total']) ? (int) $listData['total'] : null;
+        $scope = $perm['actions']['list_users'][1] ?? null;
+        $list[1] = 'GET /api/users موفق بود' . ($total !== null ? '؛ تعداد قابل مشاهده: ' . $total : '') . ($scope === 'own' ? '؛ فقط کاربران متعلق به این ادمین.' : '.');
+    }
+    rx_cap_set($report, 'list_users', $list[0], $list[1]);
+
+    rx_cap_probe_sample_user_via_manager($panel, $report);
+
+    $resourcePath = $isV1 ? '/api/groups' : '/api/inbounds';
+    $resourceResponse = marzbanCapabilityGet($panel, $resourcePath);
+    $resource = rx_cap_http_read($resourceResponse);
+    if ($resource[0] === 'verified') {
+        $data = rx_cap_json($resourceResponse);
+        if ($isV1) {
+            $groups = is_array($data['groups'] ?? null) ? $data['groups'] : [];
+            $resource[1] = 'GET /api/groups موفق بود؛ ' . count($groups) . ' گروه قابل مشاهده.';
+        } else {
+            $tags = 0;
+            foreach ((array) $data as $protocolInbounds) {
+                $tags += is_array($protocolInbounds) ? count($protocolInbounds) : 0;
+            }
+            $resource[1] = 'GET /api/inbounds موفق بود؛ ' . $tags . ' اینباند قابل مشاهده.';
+        }
+    } else {
+        $resource[1] = 'GET ' . $resourcePath . ': ' . $resource[1];
+    }
+    rx_cap_set($report, 'resources', $resource[0], $resource[1]);
+}

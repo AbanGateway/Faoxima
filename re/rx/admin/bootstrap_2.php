@@ -130,7 +130,7 @@ if (!function_exists('rx_featCategoryRows')) {
                  ['text' => $cronremovevolumestatustext, 'callback_data' => "editstsuts-notifremove_volume-{$status_cron['remove_volume']}"],
                  ['text' => "❌ کرون حذف‌حجم", 'callback_data' => "none"]],
                 [['text' => "⚙️ تنظیم", 'callback_data' => "set_panel_timeout"],
-                 ['text' => (int)($setting['panel_curl_timeout'] ?? 20) . " ثانیه", 'callback_data' => "none"],
+                 ['text' => (function_exists('faoxima_panel_timeout') ? faoxima_panel_timeout() : (int)($setting['panel_curl_timeout'] ?? 20)) . " ثانیه", 'callback_data' => "none"],
                  ['text' => "⏱ تایم پنل", 'callback_data' => "none"]],
                 [['text' => "⚙️ مدیریت", 'callback_data' => "cronjobs_settings"],
                  ['text' => "⏱ نمایش لیست", 'callback_data' => "cronjobs_settings"],

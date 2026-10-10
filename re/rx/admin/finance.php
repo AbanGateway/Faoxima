@@ -88,8 +88,13 @@ if (false) {
         $squadLine = $squadOk
             ? "🛡 Squad: ✅ " . count($configuredSquads) . " مورد انتخاب شده"
             : "🛡 Squad: ⚠️ تنظیم نشده یا نامعتبر";
+        if (!function_exists('rx_panel_capability_report')) {
+            require_once __DIR__ . '/../../../panel_capability.php';
+        }
         outtypepanel("remnawave", "✅ اتصال به پنل رمن‌ویو موفق بود.
-" . $squadLine);
+" . $squadLine . "
+
+" . rx_cap_render(rx_panel_capability_report($typepanel)));
     } else {
         outtypepanel("remnawave", "❌ اتصال ناموفق: " . ($testRes['message'] ?? '') . "
 
@@ -764,62 +769,16 @@ if (false) {
 } elseif ($text == "⁉️ اتصال به پنل" && $adminrulecheck['rule'] == "administrator") {
     $panelName = guardResolveUserPanelName($user);
     $typepanel = $panelName ? select("marzban_panel", "*", "name_panel", $panelName, "select") : null;
-    if (is_array($typepanel) && ($typepanel['type'] ?? null) == "pasarguard") {
-        if (pasarguardAuthMode($typepanel) === 'password') {
-            $pasarguardUsername = trim((string) ($typepanel['username_panel'] ?? ''));
-            $pasarguardPassword = trim((string) ($typepanel['password_panel'] ?? ''));
-            if ($pasarguardUsername === '' || $pasarguardPassword === '' || strtolower($pasarguardUsername) === 'null' || strtolower($pasarguardPassword) === 'null') {
-                outtypepanel("pasarguard", "❌ نام کاربری یا رمز عبور برای این پنل تنظیم نشده است.");
-                step('PanelMenu', $from_id);
-                return;
-            }
-            $testResult = pasarguardTestConnectionPanel($typepanel);
-        } else {
-            $pasarguardApiKey = trim((string) ($typepanel['api_key'] ?? ''));
-            if ($pasarguardApiKey === '' || strtolower($pasarguardApiKey) === 'null') {
-                outtypepanel("pasarguard", "❌ کلید API برای این پنل تنظیم نشده است.");
-                step('PanelMenu', $from_id);
-                return;
-            }
-            $testResult = pasarguardTestConnection($typepanel['url_panel'] ?? null, $pasarguardApiKey);
-        }
-        if ($testResult['status'] === false) {
-            outtypepanel("pasarguard", "❌ اتصال ناموفق: " . ($testResult['msg'] ?? ''));
-        } else {
-            outtypepanel("pasarguard", "✅ اتصال به PasarGuard موفق بود.");
-        }
-        step('PanelMenu', $from_id);
-        return;
-    }
-    if (is_array($typepanel) && ($typepanel['type'] ?? null) == "rebecca") {
-        $rebeccaApiKey = trim((string) ($typepanel['api_key'] ?? ''));
-        if ($rebeccaApiKey === '') {
-            outtypepanel("rebecca", "❌ کلید API برای این پنل تنظیم نشده است.");
-            step('PanelMenu', $from_id);
-            return;
-        }
-        $testResult = rebeccaTestConnection($typepanel['url_panel'] ?? null, $rebeccaApiKey);
-        if ($testResult['status'] === false) {
-            outtypepanel("rebecca", "❌ اتصال ناموفق: " . ($testResult['msg'] ?? ''));
-        } else {
-            outtypepanel("rebecca", "✅ اتصال به Rebecca موفق بود.");
-        }
-        step('PanelMenu', $from_id);
-        return;
-    }
-    if (!is_array($typepanel) || ($typepanel['type'] ?? null) != "guard") {
+    if (!is_array($typepanel) || empty($typepanel['type'])) {
         nm_adminInstantReply($from_id, $textbotlang['Admin']['managepanel']['errorstateuspanel'], $backadmin, 'HTML');
         return;
     }
-    $apiKey = !empty($typepanel['api_key']) ? $typepanel['api_key'] : ($typepanel['password_panel'] ?? '');
-    if (trim($apiKey) === '') {
-        outtypepanel("guard", $textbotlang['Admin']['managepanel']['guard']['connection_missing_key']);
-        step('PanelMenu', $from_id);
-        return;
+    if (!function_exists('rx_panel_capability_report')) {
+        require_once __DIR__ . '/../../../panel_capability.php';
     }
-    $testResult = guardTestConnection($typepanel['url_panel'] ?? null, $apiKey, $typepanel['guard_version'] ?? 'v1');
-    $statusText = guardFormatConnectionResult($testResult);
-    outtypepanel("guard", $statusText);
+    sendmessage($from_id, "⏳ در حال بررسی اتصال و دسترسی‌های پنل؛ ممکن است چند ثانیه طول بکشد...", null, 'HTML');
+    $capabilityReport = rx_panel_capability_report($typepanel);
+    outtypepanel($typepanel['type'], rx_cap_render($capabilityReport));
     step('PanelMenu', $from_id);
 } elseif ($text == "⚙️ سرویس پیش‌فرض" && $adminrulecheck['rule'] == "administrator") {
     $panelName = guardResolveUserPanelName($user);
@@ -4033,8 +3992,8 @@ $iduser  در ربات  رفع مسدود گردید
     step("home", $from_id);
     update("setting", "on_hold_day", $text);
 } elseif ($datain == "set_panel_timeout" && $adminrulecheck['rule'] == "administrator") {
-    $curTimeout = (int)($setting['panel_curl_timeout'] ?? 20);
-    nm_adminInstantReply($from_id, "⏱ <b>تایم‌اوت اتصال به پنل</b>\n\nمقدار فعلی: <b>{$curTimeout} ثانیه</b>\n\nمقدار جدید را (عدد بین 5 تا 120) ارسال کنید:", $backadmin, 'HTML');
+    $curTimeout = function_exists('faoxima_panel_timeout') ? faoxima_panel_timeout() : (int)($setting['panel_curl_timeout'] ?? 20);
+    nm_adminInstantReply($from_id, "⏱ <b>تایم‌اوت پنل</b>\n\nحداکثر انتظار برای هر درخواست پنل و دریافت محتوای ساب\n\nمقدار فعلی: <b>{$curTimeout} ثانیه</b>\n\nℹ️ این مقدار برای هر تلاش جداگانه اعمال می‌شود. تلاش مجدد و چند درخواست پشت‌سرهم (ورود به پنل، خواندن کاربر، دریافت ساب) ممکن است کل عملیات را طولانی‌تر از این مقدار کند.\n\nمقدار جدید را (عدد بین 5 تا 120) ارسال کنید:", $backadmin, 'HTML');
     step("get_panel_timeout", $from_id);
 } elseif ($user['step'] == "get_panel_timeout") {
     if (!isset($update['message']) && empty($text)) { return; }
@@ -4043,6 +4002,6 @@ $iduser  در ربات  رفع مسدود گردید
         return;
     }
     update("setting", "panel_curl_timeout", $text);
-    nm_adminInstantReply($from_id, "✅ تایم‌اوت پنل به <b>{$text} ثانیه</b> تغییر یافت.", $setting_panel, 'HTML');
+    nm_adminInstantReply($from_id, "✅ حداکثر انتظار برای هر درخواست پنل و دریافت محتوای ساب به <b>{$text} ثانیه</b> تغییر یافت.", $setting_panel, 'HTML');
     step("home", $from_id);
 }

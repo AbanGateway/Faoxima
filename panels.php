@@ -9,6 +9,7 @@ require_once __DIR__ . '/x-ui_single.php';
 require_once __DIR__ . '/WGDashboard.php';
 require_once __DIR__ . '/remnawave.php';
 require_once __DIR__ . '/rebecca.php';
+require_once __DIR__ . '/panel_capability.php';
 
 if (!function_exists('rx_panel_http_status_fa')) {
     function rx_panel_http_status_fa($code)
@@ -904,7 +905,8 @@ class ManagePanel
                 );
             }
         } elseif ($Get_Data_Panel['type'] == "pasarguard") {
-            $UsernameData = pasarguardGetUser($username, $Get_Data_Panel['name_panel']);
+            $pasarguardUserRaw = pasarguardGetUser($username, $Get_Data_Panel['name_panel']);
+            $UsernameData = $pasarguardUserRaw;
             if (!empty($UsernameData['error'])) {
                 $Output = array(
                     'status' => 'Unsuccessful',
@@ -935,11 +937,21 @@ class ManagePanel
                 }
                 $pasarguardLinks = [];
                 $pasarguardClientType = 'links';
-                $pasarguardLinksResponse = pasarguardGetSubscriptionLinks($username, $Get_Data_Panel['name_panel'], $client_type);
+                $pasarguardLinksResponse = pasarguardGetSubscriptionLinks($username, $Get_Data_Panel['name_panel'], $client_type, $pasarguardUserRaw);
                 if (empty($pasarguardLinksResponse['error']) && !empty($pasarguardLinksResponse['links'])) {
                     $pasarguardLinks = $pasarguardLinksResponse['links'];
                     $pasarguardClientType = (string) ($pasarguardLinksResponse['client_type'] ?? 'links');
                 }
+                $pasarguardLinksDiagnostic = array(
+                    'panel_type' => 'pasarguard',
+                    'outcome' => !empty($pasarguardLinksResponse['error'])
+                        ? (string) ($pasarguardLinksResponse['outcome'] ?? 'failed')
+                        : (empty($pasarguardLinks) ? 'empty' : 'ok'),
+                    'stage' => $pasarguardLinksResponse['stage'] ?? null,
+                    'reason' => $pasarguardLinksResponse['reason'] ?? null,
+                    'http_status' => $pasarguardLinksResponse['http_status'] ?? null,
+                    'error' => !empty($pasarguardLinksResponse['error']) ? (string) $pasarguardLinksResponse['error'] : null,
+                );
                 $Output = array(
                     'status' => $UsernameData['status'],
                     'username' => $UsernameData['username'],
@@ -956,7 +968,8 @@ class ManagePanel
                     'hwid_limit' => $UsernameData['hwid_limit'] ?? null,
                     'group_ids' => $UsernameData['group_ids'] ?? null,
                     'client_type' => $pasarguardClientType,
-                    'on_hold_expire_duration' => $UsernameData['on_hold_expire_duration'] ?? null
+                    'on_hold_expire_duration' => $UsernameData['on_hold_expire_duration'] ?? null,
+                    'links_diagnostic' => $pasarguardLinksDiagnostic
                 );
             }
         } elseif ($Get_Data_Panel['type'] == "guard") {

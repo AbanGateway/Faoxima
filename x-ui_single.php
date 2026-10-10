@@ -93,7 +93,7 @@ if (!function_exists('xui_token_single_link')) {
         if (!xui_panel_uses_token($panel) || $email === null || $email === '') {
             return null;
         }
-        $resp = xui_api_token_request($panel, 'GET', '/panel/api/clients/links/' . rawurlencode($email), null, 6, 'xui_token_single_link', $email);
+        $resp = xui_api_token_request($panel, 'GET', '/panel/api/clients/links/' . rawurlencode($email), null, null, 'xui_token_single_link', $email);
         if (empty($resp['body'])) {
             return null;
         }
@@ -154,7 +154,8 @@ function panel_login_cookie($code_panel)
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_ENCODING => '',
         CURLOPT_MAXREDIRS => 10,
-        CURLOPT_TIMEOUT_MS => 4000,
+        CURLOPT_TIMEOUT => faoxima_panel_timeout_info()['timeout'],
+        CURLOPT_CONNECTTIMEOUT => faoxima_panel_timeout_info()['connect_timeout'],
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
         CURLOPT_CUSTOMREQUEST => 'POST',
@@ -206,7 +207,6 @@ function login($code_panel, $verify = true)
 function panel_get_inbounds_list($baseUrl)
 {
     $req = new CurlRequest(rtrim($baseUrl, '/') . '/panel/api/inbounds/list');
-    $req->setTimeout(5);
     $req->setHeaders(['Accept: application/json']);
     $req->setCookie(xuisingle_cookie_path());
     return $req->get();
@@ -294,7 +294,6 @@ function fetch_subscription_links_with_retry($subscriptionUrl, $attempts = 1, $d
     $lastBody = null;
     for ($i = 0; $i < $attempts; $i++) {
         $req = new CurlRequest($subscriptionUrl);
-        $req->setTimeout(6);
         $req->setHeaders(['User-Agent: SubFetcher/1.3']);
         $res = $req->get();
         if (($res['status'] ?? 0) >= 200 && ($res['status'] ?? 0) < 300 && isset($res['body'])) {
@@ -326,7 +325,6 @@ function pick_single_link_from_sub($subUrl)
 function panel_get_inbound($baseUrl, $inboundId)
 {
     $req = new CurlRequest(rtrim($baseUrl, '/') . '/panel/api/inbounds/get/' . $inboundId);
-    $req->setTimeout(5);
     $req->setHeaders(['Accept: application/json']);
     $req->setCookie(xuisingle_cookie_path());
     $r = $req->get();
@@ -1072,7 +1070,7 @@ function get_clinets($username, $namepanel)
             'GET',
             '/panel/api/clients/traffic/' . rawurlencode($username),
             null,
-            8,
+            null,
             'get_clinets',
             $username
         );
@@ -1377,4 +1375,80 @@ function removeClient($location, $username)
     }
     @unlink(xuisingle_cookie_path());
     return $response;
+}
+
+function xui_capability_report(array $panel, array &$report)
+{
+    $tokenMode = xui_panel_uses_token($panel);
+    rx_cap_info($report, 'حالت API', $tokenMode ? 'توکن' : 'ورود با نام کاربری');
+    $base = rtrim((string) ($panel['url_panel'] ?? ''), '/');
+    if ($base === '') {
+        rx_cap_set($report, 'connection', 'failed', 'آدرس پنل تنظیم نشده است.');
+        rx_cap_mark_untested_after_connection_failure($report);
+        return;
+    }
+    $loginNote = '';
+    if ($tokenMode) {
+        $response = xui_api_token_request($panel, 'GET', '/panel/api/inbounds/list', null, null, 'capability_report');
+    } else {
+        foreach ([true, false] as $useCachedSession) {
+            $loginNote = '';
+            $loginResult = login($panel['code_panel'], $useCachedSession);
+            if (is_array($loginResult) && array_key_exists('success', $loginResult) && $loginResult['success'] === false) {
+                $loginNote = rx_cap_clean_text((string) ($loginResult['msg'] ?? 'ورود به پنل ناموفق بود.'), 160);
+            }
+            $response = panel_get_inbounds_list($base);
+            @unlink(xuisingle_cookie_path());
+            $listData = rx_cap_json($response);
+            if (is_array($listData) && !empty($listData['success'])) {
+                break;
+            }
+        }
+    }
+    $data = rx_cap_json($response);
+    $status = (int) ($response['status'] ?? 0);
+    $success = is_array($data) && !empty($data['success']);
+    if (!$success) {
+        $note = $loginNote !== '' ? $loginNote : (is_array($data) && isset($data['msg']) ? rx_cap_clean_text((string) $data['msg'], 160) : rx_cap_http_read($response)[1]);
+        if ($status >= 200 && $status < 300 && !is_array($data)) {
+            $note = 'پاسخ پنل JSON نبود؛ احتمالاً نشست ورود معتبر نیست یا آدرس پنل نادرست است.';
+        }
+        rx_cap_set($report, 'connection', 'failed', $note);
+        rx_cap_mark_untested_after_connection_failure($report);
+        return;
+    }
+    rx_cap_set($report, 'connection', 'verified', 'GET /panel/api/inbounds/list موفق بود.');
+    if ($tokenMode) {
+        rx_cap_set_writes($report, 'unknown', 'توکن API در 3x-ui متادیتای مجوز ارائه نمی‌دهد؛ عملیات نوشتنی تست نشد.');
+    } else {
+        rx_cap_set_writes($report, 'allowed', '3x-ui مدل نقش ندارد و ادمین واردشده به همه API های مدیریتی دسترسی دارد.');
+    }
+    $inbounds = is_array($data['obj'] ?? null) ? $data['obj'] : [];
+    $clients = 0;
+    $inboundIds = [];
+    foreach ($inbounds as $inbound) {
+        if (!is_array($inbound)) {
+            continue;
+        }
+        if (isset($inbound['id'])) {
+            $inboundIds[] = (int) $inbound['id'];
+        }
+        $settings = is_string($inbound['settings'] ?? null) ? json_decode($inbound['settings'], true) : ($inbound['settings'] ?? null);
+        if (is_array($settings['clients'] ?? null)) {
+            $clients += count($settings['clients']);
+        }
+    }
+    rx_cap_set($report, 'list_users', 'verified', 'لیست اینباندها شامل ' . $clients . ' کلاینت خوانده شد.');
+
+    rx_cap_probe_sample_user_via_manager($panel, $report);
+
+    $configured = xui_parse_inbound_ids($panel['inboundid'] ?? '');
+    $missing = array_values(array_diff($configured, $inboundIds));
+    $note = count($inboundIds) . ' اینباند قابل مشاهده.';
+    if (empty($configured)) {
+        $note .= ' شناسه اینباندی در ربات تنظیم نشده است.';
+    } elseif (!empty($missing)) {
+        $note .= ' اینباندهای تنظیم‌شده ناموجود: ' . implode(', ', $missing);
+    }
+    rx_cap_set($report, 'resources', (empty($missing) && !empty($configured)) ? 'verified' : 'failed', $note);
 }

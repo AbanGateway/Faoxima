@@ -566,10 +566,12 @@ function rebeccaDownloadConfigFile(string $url, string $destPath)
     if ($fp === false) {
         return false;
     }
+    $timeoutInfo = faoxima_panel_timeout_info();
     curl_setopt_array($ch, [
         CURLOPT_FILE => $fp,
         CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_TIMEOUT => 30,
+        CURLOPT_TIMEOUT => (int) $timeoutInfo['timeout'],
+        CURLOPT_CONNECTTIMEOUT => (int) $timeoutInfo['connect_timeout'],
         CURLOPT_SSL_VERIFYPEER => true,
     ]);
     $success = curl_exec($ch);
@@ -633,4 +635,130 @@ function rebeccaClientIpSummary($namePanel, string $username)
         }
     }
     return ['status' => true, 'count' => count($rawIps), 'raw' => $rawIps];
+}
+
+function rebeccaCapabilityPermissions(array $admin)
+{
+    $defaults = [
+        'standard' => ['create' => true, 'delete' => false, 'reset_usage' => false, 'revoke' => true],
+        'reseller' => ['create' => true, 'delete' => false, 'reset_usage' => false, 'revoke' => true],
+        'sudo' => ['create' => true, 'delete' => false, 'reset_usage' => false, 'revoke' => true],
+        'full_access' => ['create' => true, 'delete' => true, 'reset_usage' => true, 'revoke' => true],
+    ];
+    $role = is_string($admin['role'] ?? null) ? strtolower($admin['role']) : null;
+    $users = is_array($admin['permissions']['users'] ?? null) ? $admin['permissions']['users'] : null;
+    if ($users === null && $role !== null && isset($defaults[$role])) {
+        return ['source' => 'role_default', 'role' => $role, 'users' => $defaults[$role]];
+    }
+    if ($users !== null) {
+        return ['source' => 'permissions', 'role' => $role, 'users' => $users];
+    }
+    if (array_key_exists('is_sudo', $admin)) {
+        return ['source' => 'legacy', 'role' => !empty($admin['is_sudo']) ? 'sudo' : 'admin', 'users' => null];
+    }
+    return ['source' => 'unknown', 'role' => $role, 'users' => null];
+}
+
+function rebeccaCapabilityReport(array $panel, array &$report)
+{
+    $apiKey = trim((string) ($panel['api_key'] ?? ''));
+    $baseUrl = rebeccaGetBaseUrl($panel['url_panel'] ?? null);
+    if ($apiKey === '' || $baseUrl === '') {
+        rx_cap_set($report, 'connection', 'failed', $apiKey === '' ? 'کلید API برای این پنل تنظیم نشده است.' : 'آدرس پنل تنظیم نشده است.');
+        rx_cap_mark_untested_after_connection_failure($report);
+        return;
+    }
+    $config = ['status' => true, 'panel' => array_merge($panel, ['url_panel' => $baseUrl]), 'api_key' => $apiKey];
+    $adminResponse = rebeccaApiRequest($config, 'GET', '/api/admin');
+    $adminStatus = (int) ($adminResponse['status'] ?? 0);
+    $admin = rx_cap_json($adminResponse);
+    $adminAvailable = empty($adminResponse['error']) && $adminStatus >= 200 && $adminStatus < 300 && $admin !== null;
+    if (!$adminAvailable && empty($adminResponse['error']) && in_array($adminStatus, [404, 405], true)) {
+        $systemResponse = rebeccaApiRequest($config, 'GET', '/api/system');
+        $systemStatus = (int) ($systemResponse['status'] ?? 0);
+        if (empty($systemResponse['error']) && $systemStatus >= 200 && $systemStatus < 300) {
+            rx_cap_set($report, 'connection', 'verified', 'GET /api/system موفق بود؛ /api/admin در این نسخه در دسترس نیست.');
+            rx_cap_set_writes($report, 'unknown', 'این نسخه اطلاعات نقش و مجوز ادمین را ارائه نمی‌دهد.');
+            $admin = [];
+        } else {
+            $adminResponse = $systemResponse;
+            $adminStatus = $systemStatus;
+        }
+    }
+    if (!$adminAvailable && $admin !== []) {
+        $note = !empty($adminResponse['error'])
+            ? rx_cap_clean_text((string) $adminResponse['error'], 160)
+            : ($admin === null && $adminStatus >= 200 && $adminStatus < 300 ? 'پاسخ /api/admin JSON معتبر نبود.' : rx_cap_http_read($adminResponse)[1]);
+        rx_cap_set($report, 'connection', 'failed', $note);
+        rx_cap_mark_untested_after_connection_failure($report);
+        return;
+    }
+    if ($adminAvailable) {
+        rx_cap_set($report, 'connection', 'verified', 'GET /api/admin موفق بود.');
+        rx_cap_info($report, 'ادمین متصل', (string) ($admin['username'] ?? ''));
+        $perm = rebeccaCapabilityPermissions($admin);
+        rx_cap_info($report, 'نقش ادمین', $perm['role']);
+        if ($perm['source'] === 'legacy') {
+            rx_cap_apply_marzban_family($report, $admin);
+        } elseif ($perm['users'] === null) {
+            rx_cap_set_writes($report, 'unknown', 'پاسخ /api/admin شامل اطلاعات نقش یا مجوز نیست.');
+        } else {
+            $source = $perm['source'] === 'role_default' ? 'بر اساس پیش‌فرض نقش ' . $perm['role'] : 'بر اساس permissions.users';
+            $map = ['create' => 'create', 'delete' => 'delete', 'reset' => 'reset_usage', 'revoke' => 'revoke'];
+            foreach ($map as $key => $field) {
+                $value = $perm['users'][$field] ?? null;
+                if ($value === true) {
+                    rx_cap_set($report, $key, 'allowed', $source . '.');
+                } elseif ($value === false) {
+                    rx_cap_set($report, $key, 'denied', $source . '.');
+                } else {
+                    rx_cap_set($report, $key, 'unknown', 'فیلد users.' . $field . ' در پاسخ پنل نیست.');
+                }
+            }
+            rx_cap_set($report, 'update', 'unknown', 'Rebecca مجوز جداگانه‌ای برای ویرایش/تمدید کاربر اعلام نمی‌کند.');
+        }
+    }
+    $usersLimit = $admin['users_limit'] ?? null;
+    if ($usersLimit !== null) {
+        rx_cap_info($report, 'سقف تعداد کاربر', (int) $usersLimit);
+    }
+    $status = $admin['status'] ?? null;
+    if (is_string($status) && $status !== '' && $status !== 'active') {
+        rx_cap_info($report, 'وضعیت ادمین', $status);
+        if ($report['checks']['create']['status'] === 'allowed') {
+            rx_cap_set($report, 'create', 'unknown', 'مجوز ساخت اعلام شده، اما وضعیت ادمین «' . $status . '» است و ممکن است ساخت کاربر مسدود باشد.');
+        }
+    }
+
+    $listResponse = rebeccaApiRequest($config, 'GET', '/api/users?limit=1');
+    $list = rx_cap_http_read($listResponse);
+    if ($list[0] === 'verified') {
+        $listData = rx_cap_json($listResponse);
+        $total = is_array($listData) && isset($listData['total']) ? (int) $listData['total'] : null;
+        $list[1] = 'GET /api/users موفق بود' . ($total !== null ? '؛ تعداد قابل مشاهده: ' . $total : '') . '.';
+    }
+    rx_cap_set($report, 'list_users', $list[0], $list[1]);
+
+    rx_cap_probe_sample_user_via_manager($panel, $report);
+
+    $services = rebeccaGetServices($config);
+    if (($services['status'] ?? false) === false) {
+        $message = rx_cap_clean_text((string) ($services['msg'] ?? ''), 120);
+        rx_cap_set($report, 'resources', preg_match('/\b403\b|not allowed/i', $message) ? 'denied' : 'failed', 'GET /api/v2/services: ' . $message);
+    } else {
+        $ids = [];
+        foreach ($services['services'] as $service) {
+            if (is_array($service) && isset($service['id'])) {
+                $ids[] = (string) intval($service['id']);
+            }
+        }
+        $configured = trim((string) ($panel['rebecca_service_id'] ?? ''));
+        $note = count($ids) . ' سرویس قابل مشاهده.';
+        $ok = true;
+        if ($configured !== '') {
+            $ok = in_array($configured, $ids, true);
+            $note .= $ok ? ' سرویس پیش‌فرض تنظیم‌شده موجود است.' : ' سرویس پیش‌فرض تنظیم‌شده (' . $configured . ') در دسترس نیست.';
+        }
+        rx_cap_set($report, 'resources', $ok ? 'verified' : 'failed', $note);
+    }
 }
