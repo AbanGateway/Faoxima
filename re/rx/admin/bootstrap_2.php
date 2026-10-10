@@ -6848,7 +6848,7 @@ $text_expie_agent
     update("user", "Processing_value", $panelCanonicalName, "id", $from_id);
     step('PanelMenu', $from_id);
     if ($marzban_list_get['type'] == "marzban") {
-        $Check_token = token_panel($marzban_list_get['code_panel'], false);
+        $Check_token = token_panel($marzban_list_get['code_panel']);
         if (isset($Check_token['access_token'])) {
             $System_Stats = Get_System_Stats($panelCanonicalName);
             if ((string)($marzban_list_get['version_panel'] ?? '0') === '1') {
@@ -6890,6 +6890,8 @@ $rx_sales_metrics
 
 ⭕️ برای مدیریت پنل یکی از گزینه های زیر را انتخاب کنید";
             nm_adminInstantReply($from_id, $text_marzban, $optionMarzban, 'HTML');
+        } elseif (($Check_token['error_code'] ?? null) === 'auth_busy') {
+            nm_adminInstantReply($from_id, "⏳ " . $Check_token['error'], $optionMarzban, 'HTML');
         } elseif (isset($Check_token['detail']) && $Check_token['detail'] == "Incorrect username or password") {
             $text_marzban = "❌ نام کاربری یا رمز عبور پنل اشتباه است";
             nm_adminInstantReply($from_id, $text_marzban, $optionMarzban, 'HTML');
@@ -7215,7 +7217,7 @@ $rx_sales_metrics
             $pasarguardCredsMissing = $pasarguardUsernameStatus === '' || $pasarguardPasswordStatus === '';
             $pasarguardTestRes = $pasarguardCredsMissing
                 ? ['status' => false, 'msg' => 'نام کاربری یا رمز عبور تنظیم نشده است']
-                : pasarguardTestConnectionUserPass($marzban_list_get['url_panel'] ?? null, $pasarguardUsernameStatus, $pasarguardPasswordStatus);
+                : pasarguardTestConnectionPanel($marzban_list_get);
         } else {
             $pasarguardApiKey = trim((string) ($marzban_list_get['api_key'] ?? ''));
             $pasarguardCredsMissing = $pasarguardApiKey === '';

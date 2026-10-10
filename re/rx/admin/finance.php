@@ -685,6 +685,7 @@ if (false) {
     }
     update("marzban_panel", "username_panel", $newUsername, "name_panel", $typepanel['name_panel']);
     update("marzban_panel", "password_panel", $newPassword, "name_panel", $typepanel['name_panel']);
+    update("marzban_panel", "datelogin", null, "name_panel", $typepanel['name_panel']);
     outtypepanel("pasarguard", "🔑 نام کاربری و رمز عبور PasarGuard با موفقیت ذخیره شد.\n✅ اتصال برقرار است");
     step('PanelMenu', $from_id);
 } elseif ($user['step'] == "rebecca_edit_api_key") {
@@ -764,13 +765,24 @@ if (false) {
     $panelName = guardResolveUserPanelName($user);
     $typepanel = $panelName ? select("marzban_panel", "*", "name_panel", $panelName, "select") : null;
     if (is_array($typepanel) && ($typepanel['type'] ?? null) == "pasarguard") {
-        $pasarguardApiKey = trim((string) ($typepanel['api_key'] ?? ''));
-        if ($pasarguardApiKey === '') {
-            outtypepanel("pasarguard", "❌ کلید API برای این پنل تنظیم نشده است.");
-            step('PanelMenu', $from_id);
-            return;
+        if (pasarguardAuthMode($typepanel) === 'password') {
+            $pasarguardUsername = trim((string) ($typepanel['username_panel'] ?? ''));
+            $pasarguardPassword = trim((string) ($typepanel['password_panel'] ?? ''));
+            if ($pasarguardUsername === '' || $pasarguardPassword === '' || strtolower($pasarguardUsername) === 'null' || strtolower($pasarguardPassword) === 'null') {
+                outtypepanel("pasarguard", "❌ نام کاربری یا رمز عبور برای این پنل تنظیم نشده است.");
+                step('PanelMenu', $from_id);
+                return;
+            }
+            $testResult = pasarguardTestConnectionPanel($typepanel);
+        } else {
+            $pasarguardApiKey = trim((string) ($typepanel['api_key'] ?? ''));
+            if ($pasarguardApiKey === '' || strtolower($pasarguardApiKey) === 'null') {
+                outtypepanel("pasarguard", "❌ کلید API برای این پنل تنظیم نشده است.");
+                step('PanelMenu', $from_id);
+                return;
+            }
+            $testResult = pasarguardTestConnection($typepanel['url_panel'] ?? null, $pasarguardApiKey);
         }
-        $testResult = pasarguardTestConnection($typepanel['url_panel'] ?? null, $pasarguardApiKey);
         if ($testResult['status'] === false) {
             outtypepanel("pasarguard", "❌ اتصال ناموفق: " . ($testResult['msg'] ?? ''));
         } else {

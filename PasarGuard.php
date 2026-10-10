@@ -66,9 +66,18 @@ function pasarguardTokenCacheKey($baseUrl, $username)
     return 'pasarguard_token:' . md5($baseUrl . '|' . $username);
 }
 
+function pasarguardTokenTtl($token, $ttlSeconds = 3000)
+{
+    $ttlSeconds = (int) $ttlSeconds;
+    $exp = function_exists('rx_panel_token_jwt_exp') ? rx_panel_token_jwt_exp($token) : null;
+    if ($exp !== null) {
+        $ttlSeconds = min($ttlSeconds, $exp - time() - 60);
+    }
+    return $ttlSeconds;
+}
+
 function pasarguardCachedToken($baseUrl, $username)
 {
-    static $localCache = [];
     $key = pasarguardTokenCacheKey($baseUrl, $username);
     if (function_exists('rx_redis_get')) {
         $token = rx_redis_get($key);
@@ -76,27 +85,139 @@ function pasarguardCachedToken($baseUrl, $username)
             return (string) $token;
         }
     }
-    return $localCache[$key] ?? null;
+    $entry = $GLOBALS['__faoxima_panel_token_cache']['pasarguard'][$key] ?? null;
+    if (is_array($entry) && isset($entry['token'], $entry['expires_at']) && $entry['expires_at'] > time()) {
+        return (string) $entry['token'];
+    }
+    unset($GLOBALS['__faoxima_panel_token_cache']['pasarguard'][$key]);
+    return null;
 }
 
 function pasarguardStoreToken($baseUrl, $username, $token, $ttlSeconds = 3000)
 {
-    static $localCache = [];
+    $token = (string) $token;
+    if ($token === '') {
+        return;
+    }
+    $ttlSeconds = pasarguardTokenTtl($token, $ttlSeconds);
+    if ($ttlSeconds <= 0) {
+        return;
+    }
     $key = pasarguardTokenCacheKey($baseUrl, $username);
     if (function_exists('rx_redis_set')) {
         rx_redis_set($key, $token, $ttlSeconds);
     }
-    $localCache[$key] = $token;
+    $GLOBALS['__faoxima_panel_token_cache']['pasarguard'][$key] = [
+        'token' => $token,
+        'expires_at' => time() + $ttlSeconds,
+    ];
 }
 
-function pasarguardClearToken($baseUrl, $username)
+function pasarguardClearToken($baseUrl, $username, $onlyToken = null)
 {
-    static $localCache = [];
     $key = pasarguardTokenCacheKey($baseUrl, $username);
-    if (function_exists('rx_redis_del')) {
-        rx_redis_del($key);
+    if ($onlyToken === null) {
+        if (function_exists('rx_redis_del')) {
+            rx_redis_del($key);
+        }
+        unset($GLOBALS['__faoxima_panel_token_cache']['pasarguard'][$key]);
+        return;
     }
-    unset($localCache[$key]);
+    if (function_exists('rx_redis_release_lock')) {
+        rx_redis_release_lock($key, (string) $onlyToken);
+    }
+    $entry = $GLOBALS['__faoxima_panel_token_cache']['pasarguard'][$key] ?? null;
+    if (is_array($entry) && ($entry['token'] ?? null) === (string) $onlyToken) {
+        unset($GLOBALS['__faoxima_panel_token_cache']['pasarguard'][$key]);
+    }
+}
+
+function pasarguardPanelPdo()
+{
+    $pdo = function_exists('getDatabaseConnection') ? getDatabaseConnection() : ($GLOBALS['pdo'] ?? null);
+    return $pdo instanceof PDO ? $pdo : null;
+}
+
+function pasarguardReadPanelSession(array $panel)
+{
+    $name = (string) ($panel['name_panel'] ?? '');
+    $pdo = $name !== '' ? pasarguardPanelPdo() : null;
+    if ($pdo === null) {
+        return null;
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT datelogin FROM marzban_panel WHERE name_panel = ? LIMIT 1");
+        $stmt->execute([$name]);
+        $raw = $stmt->fetchColumn();
+    } catch (Throwable $e) {
+        error_log('pasarguardReadPanelSession: ' . $e->getMessage());
+        return null;
+    }
+    if (!is_string($raw) || $raw === '') {
+        return null;
+    }
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) {
+        return null;
+    }
+    return ['raw' => $raw, 'data' => $decoded];
+}
+
+function pasarguardStoredPanelToken(array $panel)
+{
+    $session = pasarguardReadPanelSession($panel);
+    if ($session === null) {
+        return null;
+    }
+    $data = $session['data'];
+    $baseUrl = rtrim((string) ($panel['url_panel'] ?? ''), '/');
+    $username = (string) ($panel['username_panel'] ?? '');
+    $token = (string) ($data['pasarguard_token'] ?? '');
+    if ($token === '' || ($data['pasarguard_key'] ?? null) !== pasarguardTokenCacheKey($baseUrl, $username)) {
+        return null;
+    }
+    $remaining = 3000 - (time() - (int) ($data['pasarguard_time'] ?? 0));
+    $remaining = min($remaining, pasarguardTokenTtl($token, 3000));
+    if ($remaining <= 0) {
+        return null;
+    }
+    return ['token' => $token, 'ttl' => $remaining];
+}
+
+function pasarguardSavePanelToken(array $panel, $token)
+{
+    $name = (string) ($panel['name_panel'] ?? '');
+    $pdo = $name !== '' ? pasarguardPanelPdo() : null;
+    if ($pdo === null || (string) $token === '') {
+        return;
+    }
+    $baseUrl = rtrim((string) ($panel['url_panel'] ?? ''), '/');
+    $username = (string) ($panel['username_panel'] ?? '');
+    $payload = json_encode([
+        'pasarguard_key' => pasarguardTokenCacheKey($baseUrl, $username),
+        'pasarguard_token' => (string) $token,
+        'pasarguard_time' => time(),
+    ]);
+    try {
+        $stmt = $pdo->prepare("UPDATE marzban_panel SET datelogin = ? WHERE name_panel = ?");
+        $stmt->execute([$payload, $name]);
+    } catch (Throwable $e) {
+        error_log('pasarguardSavePanelToken: ' . $e->getMessage());
+    }
+}
+
+function pasarguardForgetPanelToken(array $panel, $token)
+{
+    $session = pasarguardReadPanelSession($panel);
+    if ($session === null || ($session['data']['pasarguard_token'] ?? null) !== (string) $token) {
+        return;
+    }
+    try {
+        $stmt = pasarguardPanelPdo()->prepare("UPDATE marzban_panel SET datelogin = NULL WHERE name_panel = ? AND datelogin = ?");
+        $stmt->execute([(string) $panel['name_panel'], $session['raw']]);
+    } catch (Throwable $e) {
+        error_log('pasarguardForgetPanelToken: ' . $e->getMessage());
+    }
 }
 
 function pasarguardLogin($baseUrl, $username, $password)
@@ -125,23 +246,58 @@ function pasarguardLogin($baseUrl, $username, $password)
     return ['status' => true, 'access_token' => (string) $decoded['access_token']];
 }
 
-function pasarguardGetToken($panel, $forceRefresh = false)
+function pasarguardReusableToken($panel, $rejectedToken = null)
+{
+    $baseUrl = rtrim((string) ($panel['url_panel'] ?? ''), '/');
+    $username = (string) ($panel['username_panel'] ?? '');
+    $cached = pasarguardCachedToken($baseUrl, $username);
+    if ($cached !== null && $cached !== $rejectedToken) {
+        return $cached;
+    }
+    $stored = pasarguardStoredPanelToken($panel);
+    if ($stored !== null && $stored['token'] !== $rejectedToken) {
+        pasarguardStoreToken($baseUrl, $username, $stored['token'], $stored['ttl']);
+        return $stored['token'];
+    }
+    return null;
+}
+
+function pasarguardGetToken($panel, $forceRefresh = false, $rejectedToken = null)
 {
     $baseUrl = rtrim((string) ($panel['url_panel'] ?? ''), '/');
     $username = (string) ($panel['username_panel'] ?? '');
     $password = (string) ($panel['password_panel'] ?? '');
-    if (!$forceRefresh) {
-        $cached = pasarguardCachedToken($baseUrl, $username);
-        if ($cached !== null) {
-            return ['status' => true, 'access_token' => $cached];
+    $mayReuse = !$forceRefresh || $rejectedToken !== null;
+    if ($mayReuse) {
+        $reusable = pasarguardReusableToken($panel, $rejectedToken);
+        if ($reusable !== null) {
+            return ['status' => true, 'access_token' => $reusable];
         }
     }
-    $loginResult = pasarguardLogin($baseUrl, $username, $password);
-    if (empty($loginResult['status'])) {
+    $canLock = function_exists('rx_panel_token_lock_acquire');
+    $lock = $canLock ? rx_panel_token_lock_acquire('pasarguard', $baseUrl . '|' . $username) : null;
+    try {
+        if ($mayReuse || ($canLock && $lock === null)) {
+            $reusable = pasarguardReusableToken($panel, $rejectedToken);
+            if ($reusable !== null) {
+                return ['status' => true, 'access_token' => $reusable];
+            }
+        }
+        if ($canLock && $lock === null) {
+            return ['status' => false, 'msg' => 'PasarGuard authentication is busy, please try again shortly.'];
+        }
+        $loginResult = pasarguardLogin($baseUrl, $username, $password);
+        if (empty($loginResult['status'])) {
+            return $loginResult;
+        }
+        pasarguardStoreToken($baseUrl, $username, $loginResult['access_token']);
+        pasarguardSavePanelToken($panel, $loginResult['access_token']);
         return $loginResult;
+    } finally {
+        if ($lock !== null && function_exists('rx_panel_token_lock_release')) {
+            rx_panel_token_lock_release($lock);
+        }
     }
-    pasarguardStoreToken($baseUrl, $username, $loginResult['access_token']);
-    return $loginResult;
 }
 
 function pasarguardRequest($panel, $method, $path, $data = null)
@@ -183,8 +339,10 @@ function pasarguardRequest($panel, $method, $path, $data = null)
         }
         $response = $doRequest($tokenResult['access_token'], null);
         if (($response['status'] ?? 0) == 401) {
-            pasarguardClearToken($baseUrl, $username);
-            $retryToken = pasarguardGetToken($panel, true);
+            $rejectedToken = (string) $tokenResult['access_token'];
+            pasarguardClearToken($baseUrl, $username, $rejectedToken);
+            pasarguardForgetPanelToken($panel, $rejectedToken);
+            $retryToken = pasarguardGetToken($panel, true, $rejectedToken);
             if (empty($retryToken['status'])) {
                 return ['status' => false, 'error' => $retryToken['msg'] ?? 'PasarGuard login failed'];
             }
@@ -619,6 +777,39 @@ function pasarguardTestConnectionUserPass($baseUrl, $username, $password)
         'pasarguard_auth_mode' => 'password',
     ];
     pasarguardStoreToken($normalizedUrl, $username, $loginResult['access_token']);
+    $response = pasarguardRequest($panel, 'GET', '/api/admin');
+    if (!empty($response['error'])) {
+        return [
+            'status' => false,
+            'msg' => $response['error']
+        ];
+    }
+    $httpStatus = $response['status'] ?? null;
+    if ($httpStatus === null || $httpStatus >= 400) {
+        $decoded = json_decode((string) ($response['body'] ?? ''), true);
+        $message = is_array($decoded) && isset($decoded['detail']) ? $decoded['detail'] : "HTTP {$httpStatus}";
+        return [
+            'status' => false,
+            'msg' => is_array($message) ? json_encode($message, JSON_UNESCAPED_UNICODE) : $message
+        ];
+    }
+    return [
+        'status' => true,
+        'msg' => 'PasarGuard connection succeeded',
+        'data' => json_decode((string) ($response['body'] ?? ''), true)
+    ];
+}
+
+function pasarguardTestConnectionPanel(array $panel)
+{
+    $panel['url_panel'] = (string) ($panel['url_panel'] ?? '');
+    $panel['pasarguard_auth_mode'] = 'password';
+    if (trim((string) ($panel['username_panel'] ?? '')) === '' || trim((string) ($panel['password_panel'] ?? '')) === '') {
+        return [
+            'status' => false,
+            'msg' => 'PasarGuard username or password is missing'
+        ];
+    }
     $response = pasarguardRequest($panel, 'GET', '/api/admin');
     if (!empty($response['error'])) {
         return [

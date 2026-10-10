@@ -594,6 +594,59 @@ function panel_limit_lock_release($lockKey)
         error_log('panel_limit_lock_release: ' . $e->getMessage());
     }
 }
+if (!function_exists('rx_panel_token_lock_acquire')) {
+    function rx_panel_token_lock_acquire($scope, $identity, $timeout = 10)
+    {
+        $pdo = function_exists('getDatabaseConnection') ? getDatabaseConnection() : ($GLOBALS['pdo'] ?? null);
+        if (!($pdo instanceof PDO)) {
+            return null;
+        }
+        $lockKey = 'fx_ptok_' . md5((string) $scope . '|' . (string) $identity);
+        try {
+            $stmt = $pdo->prepare("SELECT GET_LOCK(?, ?)");
+            $stmt->execute([$lockKey, max(1, (int) $timeout)]);
+            if ((int) $stmt->fetchColumn() === 1) {
+                return $lockKey;
+            }
+        } catch (Throwable $e) {
+            error_log('rx_panel_token_lock_acquire: ' . $e->getMessage());
+        }
+        return null;
+    }
+}
+if (!function_exists('rx_panel_token_lock_release')) {
+    function rx_panel_token_lock_release($lockKey)
+    {
+        if ($lockKey === null) {
+            return;
+        }
+        $pdo = function_exists('getDatabaseConnection') ? getDatabaseConnection() : ($GLOBALS['pdo'] ?? null);
+        if (!($pdo instanceof PDO)) {
+            return;
+        }
+        try {
+            $stmt = $pdo->prepare("SELECT RELEASE_LOCK(?)");
+            $stmt->execute([$lockKey]);
+        } catch (Throwable $e) {
+            error_log('rx_panel_token_lock_release: ' . $e->getMessage());
+        }
+    }
+}
+if (!function_exists('rx_panel_token_jwt_exp')) {
+    function rx_panel_token_jwt_exp($token)
+    {
+        $parts = explode('.', (string) $token);
+        if (count($parts) !== 3) {
+            return null;
+        }
+        $payload = base64_decode(strtr($parts[1], '-_', '+/') . str_repeat('=', (4 - strlen($parts[1]) % 4) % 4), true);
+        $decoded = $payload === false ? null : json_decode($payload, true);
+        if (!is_array($decoded) || !isset($decoded['exp']) || !is_numeric($decoded['exp'])) {
+            return null;
+        }
+        return (int) $decoded['exp'];
+    }
+}
 function panel_limit_set($panel, $newLimit)
 {
     $row = panel_feature_resolve_row($panel);

@@ -1576,7 +1576,12 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
         nm_adminInstantReply($from_id, $textbotlang['Admin']['managepanel']['Inbound']['invalidprotocol'], null, 'HTML');
         return;
     }
-    $getinbounds = getinbounds($user['Processing_value'])[$text];
+    $getinbounds = getinbounds($user['Processing_value']);
+    if (is_array($getinbounds) && !empty($getinbounds['error'])) {
+        nm_adminInstantReply($from_id, "❌ " . rx_panel_error_text($getinbounds['error']), null, 'HTML');
+        return;
+    }
+    $getinbounds = $getinbounds[$text];
     $list_marzban_panel_inbounds = [
         'keyboard' => [],
         'resize_keyboard' => true,
@@ -2546,7 +2551,12 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     $config = array(
         'usage_coefficient' => $text
     );
-    Modifyuser_node($user['Processing_value'], $user['Processing_value_one'], $config);
+    $rxNodeResult = Modifyuser_node($user['Processing_value'], $user['Processing_value_one'], $config);
+    if (is_array($rxNodeResult) && !empty($rxNodeResult['error'])) {
+        nm_adminInstantReply($from_id, "❌ " . rx_panel_error_text($rxNodeResult['error']), null, 'HTML');
+        step('home', $from_id);
+        return;
+    }
     $backinfoss = json_encode([
         'inline_keyboard' => [
             [
@@ -2572,7 +2582,12 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     $config = array(
         'name' => $text
     );
-    Modifyuser_node($user['Processing_value'], $user['Processing_value_one'], $config);
+    $rxNodeResult = Modifyuser_node($user['Processing_value'], $user['Processing_value_one'], $config);
+    if (is_array($rxNodeResult) && !empty($rxNodeResult['error'])) {
+        nm_adminInstantReply($from_id, "❌ " . rx_panel_error_text($rxNodeResult['error']), null, 'HTML');
+        step('home', $from_id);
+        return;
+    }
     $backinfoss = json_encode([
         'inline_keyboard' => [
             [
@@ -2598,7 +2613,12 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     $config = array(
         'address' => $text
     );
-    Modifyuser_node($user['Processing_value'], $user['Processing_value_one'], $config);
+    $rxNodeResult = Modifyuser_node($user['Processing_value'], $user['Processing_value_one'], $config);
+    if (is_array($rxNodeResult) && !empty($rxNodeResult['error'])) {
+        nm_adminInstantReply($from_id, "❌ " . rx_panel_error_text($rxNodeResult['error']), null, 'HTML');
+        step('home', $from_id);
+        return;
+    }
     $backinfoss = json_encode([
         'inline_keyboard' => [
             [
@@ -2609,7 +2629,11 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     nm_adminInstantReply($from_id, "✅  آدرس نود با موفقیت ذخیره گردید.", $backinfoss, 'HTML');
     step('home', $from_id);
 } elseif ($datain == "reconnectnode") {
-    reconnect_node($user['Processing_value'], $user['Processing_value_one']);
+    $rxNodeResult = reconnect_node($user['Processing_value'], $user['Processing_value_one']);
+    if (is_array($rxNodeResult) && !empty($rxNodeResult['error'])) {
+        nm_adminInstantReply($from_id, "❌ " . rx_panel_error_text($rxNodeResult['error']), null, 'HTML');
+        return;
+    }
     $backinfoss = json_encode([
         'inline_keyboard' => [
             [
@@ -2620,7 +2644,11 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     $textnode = "✅ اتصال مجدد نود انجام گردید.";
     Editmessagetext($from_id, $message_id, $textnode, $backinfoss);
 } elseif ($datain == "removenode") {
-    removenode($user['Processing_value'], $user['Processing_value_one']);
+    $rxNodeResult = removenode($user['Processing_value'], $user['Processing_value_one']);
+    if (is_array($rxNodeResult) && !empty($rxNodeResult['error'])) {
+        nm_adminInstantReply($from_id, "❌ " . rx_panel_error_text($rxNodeResult['error']), null, 'HTML');
+        return;
+    }
     $backinfoss = json_encode([
         'inline_keyboard' => [
             [

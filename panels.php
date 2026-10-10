@@ -1463,7 +1463,12 @@ class ManagePanel
         $Get_Data_Panel = $this->loadPanel($name_panel, "name_panel");
         if ($Get_Data_Panel['type'] == "marzban") {
             $revoke_sub = revoke_sub($username, $name_panel);
-            if (isset($revoke_sub['detail']) && $revoke_sub['detail']) {
+            if (!empty($revoke_sub['error'])) {
+                $Output = array(
+                    'status' => 'Unsuccessful',
+                    'msg' => $revoke_sub['error']
+                );
+            } elseif (isset($revoke_sub['detail']) && $revoke_sub['detail']) {
                 $Output = array(
                     'status' => 'Unsuccessful',
                     'msg' => $revoke_sub['detail']
