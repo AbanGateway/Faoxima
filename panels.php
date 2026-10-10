@@ -2416,7 +2416,13 @@ class ManagePanel
                 $selection['trigger'] = 'either';
             }
         }
-        $normalized = rxReservationNormalizeSelection($selection, $isManual ? null : $snapshot, time());
+        $allowedPolicies = ($isManual || (string) ($rxOptions['source'] ?? '') === 'payment') ? null : rxReservationPanelSettings($panel)['allowed_policies'];
+        if (!isset($selection['policy']) || !isset($selection['trigger'])) {
+            $selection = array_merge(rxReservationDefaultSelection($isManual ? null : $snapshot, rxReservationPanelSettings($panel)), array_filter($selection, function ($value) {
+                return $value !== null;
+            }));
+        }
+        $normalized = rxReservationNormalizeSelection($selection, $isManual ? null : $snapshot, time(), $allowedPolicies);
         if (empty($normalized['ok'])) {
             return array(
                 'status' => false,

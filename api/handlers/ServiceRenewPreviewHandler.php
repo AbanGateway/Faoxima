@@ -58,7 +58,8 @@ final class ServiceRenewPreviewHandler extends BaseHandler
         $selection = null;
         if ($reservationUi) {
             $input = FaoximaInput::array($this->data, 'reservation');
-            $selection = rxReservationSelectionFromData(['rsv' => !empty($input) ? $input : rxReservationDefaultSelection($usableSnapshot)]);
+            $reservationSettings = rxReservationPanelSettings($panel);
+            $selection = rxReservationSelectionFromData(['rsv' => !empty($input) ? $input : rxReservationDefaultSelection($usableSnapshot, $reservationSettings)], null, $reservationSettings);
             if (($selection['trigger'] ?? '') === 'date') {
                 $selection['trigger_at'] = rxReservationParseDate((string)($input['trigger_at'] ?? ''), time());
             }
@@ -75,7 +76,7 @@ final class ServiceRenewPreviewHandler extends BaseHandler
         if ($reservationUi) {
             $availability = rxReservationTriggerAvailability($usableSnapshot);
             $triggers = [];
-            foreach (rxReservationTriggers() as $trigger) {
+            foreach (rxReservationSelectableTriggers() as $trigger) {
                 $triggers[] = [
                     'key' => $trigger,
                     'label' => rxRenewalText('trigger_' . $trigger),
@@ -84,7 +85,7 @@ final class ServiceRenewPreviewHandler extends BaseHandler
                 ];
             }
             $policies = [];
-            foreach (array_keys(rxRenewalPolicies()) as $policy) {
+            foreach ($reservationSettings['allowed_policies'] as $policy) {
                 $policies[] = [
                     'key' => $policy,
                     'label' => rxRenewalPolicyLabel($policy),
@@ -92,7 +93,7 @@ final class ServiceRenewPreviewHandler extends BaseHandler
                     'usage_reset_option' => rxRenewalPolicyAllowsUsageReset($policy),
                 ];
             }
-            $check = rxReservationNormalizeSelection($selection, $usableSnapshot, time());
+            $check = rxReservationNormalizeSelection($selection, $usableSnapshot, time(), $reservationSettings['allowed_policies']);
             $reservation = [
                 'selection' => $selection,
                 'triggers' => $triggers,

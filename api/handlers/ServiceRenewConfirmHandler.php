@@ -74,11 +74,15 @@ final class ServiceRenewConfirmHandler extends BaseHandler
             if (rxReservationUiEnabled($panel)) {
                 $reservationInput = FaoximaInput::array($this->data, 'reservation');
                 $usableSnapshot = !empty($snapshotCheck['ok']) && !empty($snapshotCheck['exists']) ? $snapshotCheck : null;
-                $reservation = rxReservationSelectionFromData(['rsv' => !empty($reservationInput) ? $reservationInput : rxReservationDefaultSelection($usableSnapshot)]);
+                $reservationSettings = rxReservationPanelSettings($panel);
+                if (!empty($reservationInput['policy']) && !in_array((string)$reservationInput['policy'], $reservationSettings['allowed_policies'], true)) {
+                    FaoximaResponse::fail(422, rxRenewalText('policy_not_allowed'));
+                }
+                $reservation = rxReservationSelectionFromData(['rsv' => !empty($reservationInput) ? $reservationInput : rxReservationDefaultSelection($usableSnapshot, $reservationSettings)], null, $reservationSettings);
                 if (($reservation['trigger'] ?? '') === 'date') {
                     $reservation['trigger_at'] = rxReservationParseDate((string)($reservationInput['trigger_at'] ?? ''), time());
                 }
-                $selectionCheck = rxReservationNormalizeSelection($reservation, $usableSnapshot, time());
+                $selectionCheck = rxReservationNormalizeSelection($reservation, $usableSnapshot, time(), $reservationSettings['allowed_policies']);
                 if (empty($selectionCheck['ok'])) {
                     FaoximaResponse::fail(422, rxRenewalReasonText((string)$selectionCheck['reason'], $selectionCheck));
                 }

@@ -413,6 +413,64 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     nm_adminInstantReply($from_id, $textbotlang['Admin']['SettingnowPayment']['activeshowcardstatus'], null, 'HTML');
     update("user", "cardpayment", "1");
     update("setting", "showcard", "1");
+} elseif (is_string($datain ?? null) && strpos($datain, 'rsva:') === 0) {
+    $rxReservationAnswer = function ($message = '', $alert = false) use ($callback_query_id) {
+        if (!empty($callback_query_id)) {
+            telegram('answerCallbackQuery', array_filter([
+                'callback_query_id' => $callback_query_id,
+                'text' => $message !== '' ? strip_tags($message) : null,
+                'show_alert' => $alert ?: null,
+            ], function ($value) {
+                return $value !== null;
+            }));
+        }
+    };
+    if (!in_array($from_id, $admin_ids) || ($adminrulecheck['rule'] ?? '') != "administrator") {
+        $rxReservationAnswer('⛔️', true);
+        return;
+    }
+    $rxReservationParsed = rxReservationAdminParse($datain);
+    $rxReservationPanel = is_array($rxReservationParsed) ? select("marzban_panel", "*", "code_panel", $rxReservationParsed['code'], "select") : false;
+    if (!is_array($rxReservationParsed) || !is_array($rxReservationPanel) || ($rxReservationPanel['type'] ?? '') === 'Manualsale') {
+        $rxReservationAnswer(rxRenewalText('admin_outdated'), true);
+        return;
+    }
+    $rxReservationState = $rxReservationParsed['state'];
+    $rxReservationAction = $rxReservationParsed['action'];
+    if ($rxReservationAction === 'x') {
+        $rxReservationAnswer();
+        return;
+    }
+    if ($rxReservationAction === 'b') {
+        $rxReservationAnswer(rxRenewalText('admin_cancelled'));
+        Editmessagetext($from_id, $message_id, rxRenewalText('admin_cancelled'), json_encode(['inline_keyboard' => []]));
+        update("user", "Processing_value", $rxReservationPanel['name_panel'], "id", $from_id);
+        step('PanelMenu', $from_id);
+        outtypepanel($rxReservationPanel['type'], $textbotlang['Admin']['Back-menu']);
+        return;
+    }
+    if ($rxReservationAction === 's') {
+        $rxReservationError = rxReservationAdminValidate($rxReservationState);
+        if ($rxReservationError !== null) {
+            $rxReservationAnswer($rxReservationError, true);
+            $rxReservationAdminView = rxReservationAdminView($rxReservationPanel, $rxReservationState, $rxReservationError);
+            Editmessagetext($from_id, $message_id, $rxReservationAdminView['text'], $rxReservationAdminView['keyboard'], 'HTML');
+            return;
+        }
+        rx_rn_ensure_schema();
+        update("marzban_panel", "reservation_settings", json_encode(rxReservationAdminSettingsFromState($rxReservationState), JSON_UNESCAPED_UNICODE), "code_panel", $rxReservationPanel['code_panel']);
+        update("marzban_panel", "Methodextend", 'رزرو اشتراک', "code_panel", $rxReservationPanel['code_panel']);
+        $rxReservationAnswer(rxRenewalText('admin_saved'));
+        Editmessagetext($from_id, $message_id, rxRenewalText('admin_saved'), json_encode(['inline_keyboard' => []]));
+        update("user", "Processing_value", $rxReservationPanel['name_panel'], "id", $from_id);
+        step('PanelMenu', $from_id);
+        outtypepanel($rxReservationPanel['type'], $textbotlang['Admin']['Algortimeextend']['SaveData']);
+        return;
+    }
+    $rxReservationState = rxReservationAdminApply($rxReservationState, $rxReservationAction, $rxReservationParsed['arg']);
+    $rxReservationAnswer();
+    $rxReservationAdminView = rxReservationAdminView($rxReservationPanel, $rxReservationState);
+    Editmessagetext($from_id, $message_id, $rxReservationAdminView['text'], $rxReservationAdminView['keyboard'], 'HTML');
 } elseif ($text == "🔋 روش تمدید سرویس" && $adminrulecheck['rule'] == "administrator") {
     $rxExtendMethodGuide = "🔋 روش تمدید را انتخاب کنید.
 
@@ -432,7 +490,7 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
         . "🔄 «اضافه شدن زمان و تبدیل حجم کل به حجم باقی مانده»: مصرف صفر می‌شود اما حجم باقی‌مانده حذف نمی‌شود؛ حجم کل = حجم باقی‌مانده + حجم خرید؛ انقضا = انقضای فعلی + روزهای خرید.
 
 "
-        . "📌 «رزرو اشتراک»: سرویس فعلی تغییر نمی‌کند؛ مشتری زمان فعال‌سازی (اتمام حجم یا انقضا، فقط اتمام حجم، فقط انقضا، تاریخ مشخص یا اجرای فوری) و سیاست اجرا را انتخاب می‌کند و حجم و زمان باقی‌مانده در لحظه فعال‌سازی محاسبه می‌شود.
+        . "📌 «رزرو اشتراک»: سرویس فعلی تغییر نمی‌کند؛ پس از انتخاب، منوی تنظیمات رزرو باز می‌شود تا سیاست و زمان فعال‌سازی پیش‌فرض و سیاست‌های مجاز مشتری را تعیین کنید؛ مشتری از بین گزینه‌های مجاز یک سیاست و یک زمان فعال‌سازی (اتمام حجم یا انقضا، فقط اتمام حجم، فقط انقضا یا تاریخ مشخص) انتخاب می‌کند و حجم و زمان باقی‌مانده در لحظه فعال‌سازی محاسبه می‌شود.
 
 "
         . "ℹ️ مصرف بیش از سقف قبلی هیچ‌گاه از حجم خریداری‌شده کم نمی‌شود. برای سرویس منقضی‌شده، روزهای خرید از زمان اجرا محاسبه و سرویس دوباره فعال می‌شود. سرویسی که توسط مدیر غیرفعال شده تمدید خودکار نمی‌شود.";
@@ -456,6 +514,19 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     if ($panelName === '') {
         nm_adminInstantReply($from_id, "❌ پنل انتخاب نشده است.", $keyboardadmin, 'HTML');
         step('home', $from_id);
+        return;
+    }
+    if ($text == 'رزرو اشتراک') {
+        rx_rn_ensure_schema();
+        $rxReservationPanel = select("marzban_panel", "*", "name_panel", $panelName, "select");
+        if (!is_array($rxReservationPanel) || ($rxReservationPanel['type'] ?? '') === 'Manualsale') {
+            nm_adminInstantReply($from_id, rxRenewalText('reason_reservation_unsupported'), null, 'HTML');
+            return;
+        }
+        update("user", "Processing_value", $panelName, "id", $from_id);
+        step('PanelMenu', $from_id);
+        $rxReservationAdminView = rxReservationAdminView($rxReservationPanel, rxReservationAdminState(rxReservationPanelSettings($rxReservationPanel)));
+        nm_adminInstantReply($from_id, $rxReservationAdminView['text'], $rxReservationAdminView['keyboard'], 'HTML');
         return;
     }
     update("marzban_panel", "Methodextend", $text, "name_panel", $panelName);

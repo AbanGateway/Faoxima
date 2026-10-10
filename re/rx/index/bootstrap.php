@@ -3269,51 +3269,106 @@ $nameconfig";
     if ($rxReservationUi && empty($rxRenewPreview['blocked'])) {
         sendmessage($from_id, $rxReservationBuilt['view']['text'], $rxReservationBuilt['view']['keyboard'], 'HTML');
     }
-} elseif (in_array($datain, ['rsvt', 'rsvp', 'rsvu'], true)) {
+} elseif (in_array($datain, ['rsvt', 'rsvp', 'rsvu', 'rsvd'], true) || preg_match('/^rsvc:([^:]+):([a-z])([0-9]?)$/', (string) $datain, $rxRsvMatch)) {
+    $rxRsvAnswer = function ($message = '', $alert = false) use ($callback_query_id) {
+        if (!empty($callback_query_id)) {
+            telegram('answerCallbackQuery', array_filter([
+                'callback_query_id' => $callback_query_id,
+                'text' => $message !== '' ? strip_tags($message) : null,
+                'show_alert' => $alert ?: null,
+            ], function ($value) {
+                return $value !== null;
+            }));
+        }
+    };
     $userdate = json_decode($user['Processing_value'], true);
-    $nameloc = is_array($userdate) ? select("invoice", "*", "id_invoice", $userdate['id_invoice'] ?? '', "select") : false;
+    $nameloc = !empty($rxRsvMatch) ? select("invoice", "*", "id_invoice", $rxRsvMatch[1], "select") : false;
     $marzban_list_get = is_array($nameloc) ? select("marzban_panel", "*", "name_panel", $nameloc['Service_location'], "select") : false;
-    if (!is_array($nameloc) || !rxReservationUiEnabled($marzban_list_get)) {
-        sendmessage($from_id, $datatextbot['dyn_errors_extend_restart_process'] ?? "❌ خطایی رخ داده است مراحل تمدید را از اول انجام دهید.", $keyboard, 'HTML');
+    if (empty($rxRsvMatch) || !is_array($nameloc) || (string) ($nameloc['id_user'] ?? '') !== (string) $from_id
+        || !is_array($userdate) || (string) ($userdate['id_invoice'] ?? '') !== (string) $rxRsvMatch[1]
+        || !rxReservationUiEnabled($marzban_list_get)) {
+        $rxRsvAnswer(rxRenewalText('button_outdated'), true);
         return;
     }
-    $rxSelection = rxReservationSelectionFromData($userdate);
+    $rxAction = $rxRsvMatch[2];
+    $rxArg = $rxRsvMatch[3] === '' ? null : (int) $rxRsvMatch[3];
+    if ($rxAction === 'x') {
+        $rxRsvAnswer();
+        return;
+    }
+    if ($rxAction === 'd') {
+        $rxRsvAnswer();
+        sendmessage($from_id, rxRenewalText('reservation_date_prompt'), $backuser, 'HTML');
+        step('rsv_get_date', $from_id);
+        return;
+    }
+    $rxSettings = rxReservationPanelSettings($marzban_list_get);
     $rxProbe = rx_pf_panel_snapshot($ManagePanel, (string) $marzban_list_get['name_panel'], (string) $nameloc['username'], (string) $marzban_list_get['type']);
     $rxProbe = !empty($rxProbe['ok']) && !empty($rxProbe['exists']) ? $rxProbe : null;
-    if ($datain == 'rsvt') {
-        $rxSelection['trigger'] = rxReservationNextTrigger($rxSelection['trigger'], $rxProbe);
-    } elseif ($datain == 'rsvp') {
-        $rxSelection['policy'] = rxReservationNextPolicy($rxSelection['policy']);
-        $rxSelection['reset_usage'] = $rxSelection['reset_usage'] && rxRenewalPolicyAllowsUsageReset($rxSelection['policy']);
+    $rxSelection = rxReservationSelectionFromData($userdate, $rxProbe, $rxSettings);
+    $rxPolicyKeys = array_keys(rxRenewalPolicies());
+    $rxTriggerKeys = rxReservationSelectableTriggers();
+    if ($rxAction === 'p') {
+        $rxPolicy = $rxArg !== null ? ($rxPolicyKeys[$rxArg] ?? null) : null;
+        if ($rxPolicy === null || !in_array($rxPolicy, $rxSettings['allowed_policies'], true)) {
+            $rxRsvAnswer(rxRenewalText('policy_not_allowed'), true);
+            return;
+        }
+        $rxSelection['policy'] = $rxPolicy;
+        $rxSelection['reset_usage'] = $rxSelection['reset_usage'] && rxRenewalPolicyAllowsUsageReset($rxPolicy);
+    } elseif ($rxAction === 't') {
+        $rxTrigger = $rxArg !== null ? ($rxTriggerKeys[$rxArg] ?? null) : null;
+        $rxAvailability = rxReservationTriggerAvailability($rxProbe);
+        if ($rxTrigger === null) {
+            $rxRsvAnswer(rxRenewalText('button_outdated'), true);
+            return;
+        }
+        if (empty($rxAvailability[$rxTrigger]['available'])) {
+            $rxRsvAnswer((string) $rxAvailability[$rxTrigger]['reason'], true);
+            return;
+        }
+        if ($rxSelection['trigger'] !== $rxTrigger) {
+            $rxSelection['trigger_at'] = null;
+        }
+        $rxSelection['trigger'] = $rxTrigger;
+    } elseif ($rxAction === 'u') {
+        if (!rxRenewalPolicyAllowsUsageReset($rxSelection['policy'])) {
+            $rxRsvAnswer(rxRenewalText('button_outdated'), true);
+            return;
+        }
+        $rxSelection['reset_usage'] = !$rxSelection['reset_usage'];
     } else {
-        $rxSelection['reset_usage'] = !$rxSelection['reset_usage'] && rxRenewalPolicyAllowsUsageReset($rxSelection['policy']);
+        $rxRsvAnswer(rxRenewalText('button_outdated'), true);
+        return;
     }
     savedata("save", "rsv", $rxSelection);
+    $rxRsvAnswer();
     $rxReservationBuilt = rxReservationBuildView($ManagePanel, $marzban_list_get, $nameloc, $rxSelection, $userdate['data_limit'] ?? 0, $userdate['time'] ?? 0);
     Editmessagetext($from_id, $message_id, $rxReservationBuilt['view']['text'], $rxReservationBuilt['view']['keyboard']);
-} elseif ($datain == 'rsvd') {
-    sendmessage($from_id, rxRenewalText('reservation_date_prompt'), $backuser, 'HTML');
-    step('rsv_get_date', $from_id);
 } elseif ($user['step'] == 'rsv_get_date') {
     if (!isset($update['message']) && empty($text)) { return; }
     $userdate = json_decode($user['Processing_value'], true);
+    $nameloc = is_array($userdate) ? select("invoice", "*", "id_invoice", $userdate['id_invoice'] ?? '', "select") : false;
+    $marzban_list_get = is_array($nameloc) ? select("marzban_panel", "*", "name_panel", $nameloc['Service_location'], "select") : false;
+    if (!is_array($nameloc) || (string) ($nameloc['id_user'] ?? '') !== (string) $from_id || !rxReservationUiEnabled($marzban_list_get)) {
+        step('home', $from_id);
+        sendmessage($from_id, rxRenewalText('button_outdated'), $keyboard, 'HTML');
+        return;
+    }
     $rxTriggerAt = rxReservationParseDate($text, time());
     if ($rxTriggerAt === null) {
         sendmessage($from_id, rxRenewalText('reason_trigger_date_invalid'), $backuser, 'HTML');
         return;
     }
-    $rxSelection = rxReservationSelectionFromData($userdate);
+    $rxSettings = rxReservationPanelSettings($marzban_list_get);
+    $rxSelection = rxReservationSelectionFromData($userdate, null, $rxSettings);
     $rxSelection['trigger'] = 'date';
     $rxSelection['trigger_at'] = $rxTriggerAt;
     savedata("save", "rsv", $rxSelection);
     step('home', $from_id);
     sendmessage($from_id, rxRenewalText('reservation_date_saved', ['date' => rxRenewalFormatExpire($rxTriggerAt)]), $keyboard, 'HTML');
-    $nameloc = is_array($userdate) ? select("invoice", "*", "id_invoice", $userdate['id_invoice'] ?? '', "select") : false;
-    $marzban_list_get = is_array($nameloc) ? select("marzban_panel", "*", "name_panel", $nameloc['Service_location'], "select") : false;
-    if (is_array($nameloc) && rxReservationUiEnabled($marzban_list_get)) {
-        $rxReservationBuilt = rxReservationBuildView($ManagePanel, $marzban_list_get, $nameloc, $rxSelection, $userdate['data_limit'] ?? 0, $userdate['time'] ?? 0);
-        sendmessage($from_id, $rxReservationBuilt['view']['text'], $rxReservationBuilt['view']['keyboard'], 'HTML');
-    }
+    $rxReservationBuilt = rxReservationBuildView($ManagePanel, $marzban_list_get, $nameloc, $rxSelection, $userdate['data_limit'] ?? 0, $userdate['time'] ?? 0);
+    sendmessage($from_id, $rxReservationBuilt['view']['text'], $rxReservationBuilt['view']['keyboard'], 'HTML');
 } elseif ($datain == "discountextend") {
     sendmessage($from_id, $textbotlang['users']['Discount']['getcodesell'], $backuser, 'HTML');
     step('getcodesellDiscountextend', $from_id);
@@ -3378,7 +3433,7 @@ $nameconfig";
         $info_product['price_product'] = $info_product['price_product'] - $result;
     }
     $info_product['price_product'] = round($info_product['price_product']);
-    $rxRenewPreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $nameloc['username'], $info_product['Volume_constraint'], $info_product['Service_time'], ['reservation' => rxReservationUiEnabled($marzban_list_get) ? rxReservationSelectionFromData($userdate) : null, 'id_invoice' => (string) $nameloc['id_invoice']]);
+    $rxRenewPreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $nameloc['username'], $info_product['Volume_constraint'], $info_product['Service_time'], ['reservation' => rxReservationUiEnabled($marzban_list_get) ? rxReservationSelectionFromData($userdate, null, rxReservationPanelSettings($marzban_list_get)) : null, 'id_invoice' => (string) $nameloc['id_invoice']]);
     if (intval($info_product['Service_time']) == 0)
         $info_product['Service_time'] = $textbotlang['users']['stateus']['Unlimited'];
     if (intval($info_product['Volume_constraint']) == 0)
@@ -3501,14 +3556,18 @@ $nameconfig";
     $fxRenewSnapshot = fx_pricing_snapshot($marzban_list_get, $fxRenewKinds, $fxRenewBasePrice, $pricelastextend, (float) $prodcut['price_product'] - (float) $pricelastextend, ['product' => (string) ($prodcut['code_product'] ?? '')]);
     $DataUserOut = $ManagePanel->DataUser($nameloc['Service_location'], $nameloc['username']);
     $rxConfirmSnapshot = rx_pf_snapshot_from_datauser($DataUserOut, (string) ($marzban_list_get['type'] ?? ''));
-    $rxReservationSelection = rxReservationUiEnabled($marzban_list_get) ? rxReservationSelectionFromData($userdata) : null;
+    $rxReservationSelection = rxReservationUiEnabled($marzban_list_get) ? rxReservationSelectionFromData($userdata, null, rxReservationPanelSettings($marzban_list_get)) : null;
     $rxConfirmPreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $nameloc['username'], $prodcut['Volume_constraint'], $prodcut['Service_time'], ['reservation' => $rxReservationSelection, 'snapshot' => $rxConfirmSnapshot, 'id_invoice' => (string) $nameloc['id_invoice']]);
     if (!empty($rxConfirmPreview['blocked'])) {
         sendmessage($from_id, (string) $rxConfirmPreview['text'], null, 'HTML');
         return;
     }
     if (is_array($rxReservationSelection)) {
-        $rxSelectionCheck = rxReservationNormalizeSelection($rxReservationSelection, !empty($rxConfirmSnapshot['ok']) && !empty($rxConfirmSnapshot['exists']) ? $rxConfirmSnapshot : null, time());
+        if (isset($userdata['rsv']['policy']) && (string) $userdata['rsv']['policy'] !== $rxReservationSelection['policy']) {
+            sendmessage($from_id, rxRenewalText('policy_not_allowed'), null, 'HTML');
+            return;
+        }
+        $rxSelectionCheck = rxReservationNormalizeSelection($rxReservationSelection, !empty($rxConfirmSnapshot['ok']) && !empty($rxConfirmSnapshot['exists']) ? $rxConfirmSnapshot : null, time(), rxReservationPanelSettings($marzban_list_get)['allowed_policies']);
         if (empty($rxSelectionCheck['ok'])) {
             sendmessage($from_id, rxRenewalReasonText((string) $rxSelectionCheck['reason'], $rxSelectionCheck), null, 'HTML');
             return;
