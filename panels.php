@@ -852,7 +852,7 @@ class ManagePanel
                     $UsernameData['subscription_url'] = $Get_Data_Panel['url_panel'] . "/" . ltrim($UsernameData['subscription_url'], "/");
                 }
                 if ((string)($Get_Data_Panel['version_panel'] ?? '0') === '1') {
-                    $UsernameData['expire'] = strtotime($UsernameData['expire']);
+                    $UsernameData['expire'] = empty($UsernameData['expire']) ? 0 : strtotime((string) $UsernameData['expire']);
                     $UsernameData['links'] = base64_decode(outputlunk($UsernameData['subscription_url']));
                     $UsernameData['links'] = explode("\n", $UsernameData['links']);
                     $sublist_update = get_list_update($name_panel, $username);
@@ -899,7 +899,8 @@ class ManagePanel
                     'uuid' => $UsernameData['proxies'],
                     'data_limit_reset' => $UsernameData['data_limit_reset_strategy'],
                     'group_ids' => $UsernameData['group_ids'] ?? null,
-                    'inbounds' => $UsernameData['inbounds'] ?? null
+                    'inbounds' => $UsernameData['inbounds'] ?? null,
+                    'on_hold_expire_duration' => $UsernameData['on_hold_expire_duration'] ?? null
                 );
             }
         } elseif ($Get_Data_Panel['type'] == "pasarguard") {
@@ -954,7 +955,8 @@ class ManagePanel
                     'data_limit_reset' => $UsernameData['data_limit_reset_strategy'],
                     'hwid_limit' => $UsernameData['hwid_limit'] ?? null,
                     'group_ids' => $UsernameData['group_ids'] ?? null,
-                    'client_type' => $pasarguardClientType
+                    'client_type' => $pasarguardClientType,
+                    'on_hold_expire_duration' => $UsernameData['on_hold_expire_duration'] ?? null
                 );
             }
         } elseif ($Get_Data_Panel['type'] == "guard") {
@@ -1121,8 +1123,10 @@ class ManagePanel
                 if ($expire - time() <= 0)
                     $user_data['enable'] = "expired";
             }
+            $xuiOnHoldDuration = null;
             if ($user_data['expiryTime'] < -10000) {
                 $user_data['enable'] = "on_hold";
+                $xuiOnHoldDuration = (int) round(abs((float) $user_data['expiryTime']) / 1000);
                 $expire = 0;
             }
             $subscriptionUrl = rtrim($Get_Data_Panel['linksubx'], '/') . "/{$user_data['subId']}";
@@ -1190,6 +1194,7 @@ class ManagePanel
                 'sub_updated_at' => null,
                 'sub_last_user_agent' => null,
                 'single_config_file' => $singleConfigFile,
+                'on_hold_expire_duration' => $xuiOnHoldDuration,
             );
 
         } elseif ($Get_Data_Panel['type'] == "Manualsale") {
@@ -1269,14 +1274,10 @@ class ManagePanel
                         $jobtime = $job;
                     }
                 }
-                if (intval($invoiceinfo['Service_time']) == 0) {
-                    $expire = 0;
+                if (isset($jobtime['Value'])) {
+                    $expire = strtotime($jobtime['Value']);
                 } else {
-                    if (isset($jobtime['Value'])) {
-                        $expire = strtotime($jobtime['Value']);
-                    } else {
-                        $expire = 0;
-                    }
+                    $expire = 0;
                 }
                 $status = "active";
                 if (!$UsernameData['configuration']['Status'])
@@ -1285,7 +1286,7 @@ class ManagePanel
                     $status = "expired";
                 }
                 $data_useage = ($UsernameData['total_data'] * pow(1024, 3)) + ($UsernameData['cumu_data'] * pow(1024, 3));
-                if (($jobvolume['Value'] * pow(1024, 3)) < $data_useage) {
+                if (isset($jobvolume['Value']) && ($jobvolume['Value'] * pow(1024, 3)) < $data_useage) {
                     $status = "limited";
                 }
                 $download_config = downloadconfig($Get_Data_Panel['name_panel'], $UsernameData['id']);
@@ -1445,6 +1446,7 @@ class ManagePanel
                 'uuid' => null,
                 'data_limit_reset' => $userData['data_limit_reset_strategy'] ?? null,
                 'ip_limit' => intval($userData['ip_limit'] ?? 0),
+                'on_hold_expire_duration' => $userData['on_hold_expire_duration'] ?? null,
             );
         } else {
             $Output = array(
@@ -2235,80 +2237,59 @@ class ManagePanel
             );
         }
     }
-    function extend($Method_extend, $new_limit, $time_day, $username, $code_product, $name_panel, $rxTarget = null)
+    function extend($Method_extend, $new_limit, $time_day, $username, $code_product, $name_panel, $rxTarget = null, $rxOptions = array())
     {
+        $rxOptions = is_array($rxOptions) ? $rxOptions : array();
         $panel = $this->loadPanel($name_panel, "code_panel");
-        $product = select("product", "*", "code_product", $code_product, "select");
-        $invoice = select("invoice", "*", "username", $username, "select");
-        if ($code_product == "custom_volume")
-            $product = true;
-        if ($panel == false || $product == false) {
+        $code_product = rxRenewalNormalizeProductCode($code_product);
+        $product = $code_product === 'custom_volume' ? array() : select("product", "*", "code_product", $code_product, "select");
+        if (!is_array($product)) {
+            $product = array();
+        }
+        if ($panel == false) {
             return array(
                 'status' => false,
+                'code' => 'panel_not_found',
+                'no_mutation' => true,
                 'msg' => 'data not found'
             );
         }
+        $invoice = $this->rxRenewalInvoiceRow($username, $panel);
         $data_user = $this->DataUser($panel['name_panel'], $username);
-        if ($data_user['status'] == "Unsuccessful") {
+        if (!is_array($data_user) || ($data_user['status'] ?? '') == "Unsuccessful") {
+            $rxReadMsg = is_array($data_user) ? ($data_user['msg'] ?? '') : 'invalid panel response';
             return array(
                 'status' => false,
-                'msg' => $data_user['msg']
+                'code' => rx_pf_user_missing_message(is_scalar($rxReadMsg) ? (string) $rxReadMsg : '') ? 'user_missing' : 'panel_read_failed',
+                'no_mutation' => true,
+                'msg' => $rxReadMsg
             );
         }
         $rxMode = rxRenewalMode($Method_extend);
         if ($rxMode === null) {
-            if (function_exists('rx_log_event')) {
-                rx_log_event('RENEWAL_UNKNOWN_METHOD', 'Unknown Methodextend; renewal refused without panel mutation', array(
-                    'method' => (string) $Method_extend,
-                    'username' => (string) $username,
-                    'panel' => (string) $panel['name_panel'],
-                ));
-            }
+            rx_pf_log('RENEWAL_UNKNOWN_METHOD', 'Unknown Methodextend; renewal refused without panel mutation', array(
+                'method' => (string) $Method_extend,
+                'username' => (string) $username,
+                'panel' => (string) $panel['name_panel'],
+            ));
             return array(
                 'status' => false,
                 'code' => 'unsupported_renewal_method',
+                'no_mutation' => true,
                 'msg' => 'unsupported renewal method: ' . (string) $Method_extend
             );
         }
-        if (!empty($rxMode['queued'])) {
-            global $pdo;
-            $existingQueuedStmt = $pdo->prepare("SELECT * FROM queued_renewal WHERE username = :username AND status = 'pending' LIMIT 1");
-            $existingQueuedStmt->execute([':username' => $username]);
-            $existingQueued = $existingQueuedStmt->fetch(PDO::FETCH_ASSOC);
-            if ($existingQueued !== false) {
-                return array(
-                    'status' => false,
-                    'code' => 'queued_renewal_exists',
-                    'msg' => 'a queued renewal is already pending for this service'
-                );
+        $rxSnapshot = rx_pf_snapshot_from_datauser($data_user, (string) $panel['type']);
+        $rxPolicy = (string) ($rxMode['policy'] ?? '');
+        $rxResetUsage = !empty($rxMode['reset_usage']);
+        if (!empty($rxMode['queued']) && !is_array($rxTarget)) {
+            $rxRegistered = $this->rxRenewalRegisterReservation($panel, $invoice, $product, $code_product, $new_limit, $time_day, $username, $rxSnapshot, $rxOptions);
+            if ($rxRegistered !== null) {
+                return $rxRegistered;
             }
-            try {
-                $stmt = $pdo->prepare("INSERT INTO queued_renewal (id_user, username, name_panel, code_panel, code_product, new_limit_gb, time_day, price, id_invoice, status, bottype, created_at) VALUES (:id_user, :username, :name_panel, :code_panel, :code_product, :new_limit_gb, :time_day, :price, :id_invoice, 'pending', :bottype, :created_at)");
-                $stmt->execute(array(
-                    ':id_user' => $invoice != false ? $invoice['id_user'] : null,
-                    ':username' => $username,
-                    ':name_panel' => $panel['name_panel'],
-                    ':code_panel' => $panel['code_panel'],
-                    ':code_product' => $code_product,
-                    ':new_limit_gb' => $new_limit,
-                    ':time_day' => $time_day,
-                    ':price' => $product !== true ? ($product['price_product'] ?? '0') : '0',
-                    ':id_invoice' => $invoice != false ? $invoice['id_invoice'] : null,
-                    ':bottype' => $invoice != false ? ($invoice['bottype'] ?? null) : null,
-                    ':created_at' => date('Y/m/d H:i:s'),
-                ));
-            } catch (Throwable $e) {
-                error_log('[panels] queued_renewal insert failed: ' . $e->getMessage());
-                return array(
-                    'status' => false,
-                    'code' => 'queued_renewal_insert_failed',
-                    'msg' => $e->getMessage()
-                );
-            }
-            return array(
-                'status' => true,
-                'queued' => true
-            );
+            $rxSelection = (array) ($rxOptions['reservation'] ?? array());
+            $rxPolicy = (string) ($rxSelection['policy'] ?? 'reset_all');
+            $rxResetUsage = !empty($rxSelection['reset_usage']) && rxRenewalPolicyAllowsUsageReset($rxPolicy);
         }
         if ($panel['type'] == "Manualsale") {
             global $pdo;
@@ -2327,6 +2308,7 @@ class ManagePanel
                 return array(
                     'status' => false,
                     'code' => 'manual_stock_empty',
+                    'no_mutation' => true,
                     'msg' => 'no manual config available in stock for renewal'
                 );
             }
@@ -2357,7 +2339,9 @@ class ManagePanel
                 'volume' => false,
                 'time' => false,
             ));
-            update("invoice", "notifctions", $notifctions, 'id_invoice', $invoice['id_invoice']);
+            if (is_array($invoice)) {
+                update("invoice", "notifctions", $notifctions, 'id_invoice', $invoice['id_invoice']);
+            }
             update("invoice", 'Status', "active", "username", $username);
             return array(
                 'status' => true,
@@ -2366,59 +2350,375 @@ class ManagePanel
                 'file_ext' => $newConfig['file_ext']
             );
         }
-        if (is_array($rxTarget) && array_key_exists('data_limit', $rxTarget) && array_key_exists('expire', $rxTarget)) {
+        if (is_array($rxTarget) && !empty($rxTarget['rx_renewal_plan']) && !empty($rxTarget['ok'])) {
             $rxPlan = $rxTarget;
         } else {
-            $rxPlan = rxBuildRenewalTarget(time(), $Method_extend, array(
-                'data_limit' => $data_user['data_limit'] ?? 0,
-                'expire' => $data_user['expire'] ?? 0,
-                'used_traffic' => $data_user['used_traffic'] ?? 0,
-                'status' => $data_user['status'] ?? '',
-            ), $new_limit, $time_day);
+            if (empty($rxSnapshot['ok']) || empty($rxSnapshot['exists'])) {
+                return array(
+                    'status' => false,
+                    'code' => 'panel_state_unavailable',
+                    'no_mutation' => true,
+                    'msg' => 'panel state unavailable: ' . (string) ($rxSnapshot['error'] ?? '')
+                );
+            }
+            $rxPlan = rxRenewalPlanForSnapshot($rxSnapshot, $panel, (string) $username, $rxPolicy, $rxResetUsage, $new_limit, $time_day, (string) $rxMode['method']);
             if (empty($rxPlan['ok'])) {
-                if (function_exists('rx_log_event')) {
-                    rx_log_event('RENEWAL_REFUSED', 'Renewal target could not be built safely; no panel mutation', array(
-                        'reason' => (string) ($rxPlan['reason'] ?? ''),
-                        'method' => (string) $Method_extend,
-                        'username' => (string) $username,
-                        'panel' => (string) $panel['name_panel'],
-                    ));
-                }
+                rx_pf_log('RENEWAL_REFUSED', 'Renewal target could not be built; no panel mutation', array(
+                    'reason' => (string) ($rxPlan['reason'] ?? ''),
+                    'method' => (string) $Method_extend,
+                    'policy' => $rxPolicy,
+                    'username' => (string) $username,
+                    'panel' => (string) $panel['name_panel'],
+                    'before' => rx_pf_limits($rxSnapshot),
+                    'status' => (string) ($rxSnapshot['status'] ?? ''),
+                ));
                 return array(
                     'status' => false,
                     'code' => (string) ($rxPlan['reason'] ?? 'renewal_refused'),
+                    'no_mutation' => true,
+                    'plan' => $rxPlan,
                     'msg' => 'renewal refused: ' . (string) ($rxPlan['reason'] ?? '')
                 );
             }
         }
-        $notifctions = json_encode(array(
-            'volume' => false,
-            'time' => false,
-        ));
-        update("invoice", "notifctions", $notifctions, 'id_invoice', $invoice['id_invoice']);
-        $data_limit_new = (int) $rxPlan['data_limit'];
-        $time_new = (int) $rxPlan['expire'];
-        $rxResetUsage = array_key_exists('reset_usage', $rxPlan) ? !empty($rxPlan['reset_usage']) : !empty($rxMode['reset_usage']);
+        return $this->applyRenewalPlan($panel, $data_user, $invoice, $product, $rxPlan, array_merge($rxOptions, array(
+            'username' => (string) $username,
+            'method' => (string) $Method_extend,
+        )));
+    }
 
-        $inbound_id = isset($panel['inboundid']) ? $panel['inboundid'] : 1;
-        $inbounds = is_string($panel['inbounds']) ? json_decode($panel['inbounds']) : "{}";
-        $inbounds = $product['inbounds'] != null ? json_decode($product['inbounds']) : $inbounds;
-        if ($panel['type'] != "WGDashboard") {
-            update("invoice", 'user_info', null, "username", $username);
-        }
-        update("invoice", 'uuid', null, "username", $username);
-        update("invoice", 'Status', "active", "username", $username);
-        if ($rxResetUsage) {
-            $reset = $this->ResetUserDataUsage($username, $panel['name_panel']);
-            if ($reset['status'] == false) {
-                return array(
-                    'status' => false,
-                    'msg' => 'error reset : ' . $reset['msg']
-                );
+    private function rxRenewalRegisterReservation(array $panel, $invoice, array $product, $code_product, $new_limit, $time_day, $username, array $snapshot, array $rxOptions)
+    {
+        $selection = is_array($rxOptions['reservation'] ?? null) ? $rxOptions['reservation'] : array();
+        $isManual = $panel['type'] == "Manualsale";
+        if ($isManual) {
+            $selection['policy'] = 'reset_all';
+            $selection['reset_usage'] = false;
+            if (($selection['trigger'] ?? '') !== 'date') {
+                $selection['trigger'] = 'either';
             }
         }
+        $normalized = rxReservationNormalizeSelection($selection, $isManual ? null : $snapshot, time());
+        if (empty($normalized['ok'])) {
+            return array(
+                'status' => false,
+                'code' => (string) $normalized['reason'],
+                'no_mutation' => true,
+                'detail' => (string) ($normalized['detail'] ?? ''),
+                'msg' => 'reservation refused: ' . (string) $normalized['reason']
+            );
+        }
+        if ($normalized['trigger'] === 'immediate') {
+            return null;
+        }
+        $context = rxRenewalContext($panel, (string) $username);
+        if ($context['admin_blocked'] || ($snapshot['status'] ?? '') === 'disabled') {
+            return array('status' => false, 'code' => 'admin_blocked', 'no_mutation' => true, 'msg' => 'service is blocked by an administrator');
+        }
+        if (!is_numeric($new_limit) || !is_numeric($time_day) || (float) $new_limit < 0 || (float) $time_day < 0) {
+            return array('status' => false, 'code' => 'invalid_purchase', 'no_mutation' => true, 'msg' => 'invalid purchased quantities');
+        }
+        $invoice = is_array($invoice) ? $invoice : array();
+        $registered = rxReservationRegister(array(
+            'service_key' => rx_rn_service_key($invoice['id_invoice'] ?? '', $panel['code_panel'], $username),
+            'id_user' => (string) ($invoice['id_user'] ?? ($rxOptions['id_user'] ?? '')),
+            'username' => (string) $username,
+            'name_panel' => (string) $panel['name_panel'],
+            'code_panel' => (string) $panel['code_panel'],
+            'code_product' => (string) $code_product,
+            'new_limit_gb' => (string) $new_limit,
+            'time_day' => (string) $time_day,
+            'price' => (string) ($rxOptions['price'] ?? ($product['price_product'] ?? '0')),
+            'id_invoice' => $invoice['id_invoice'] ?? null,
+            'bottype' => $invoice['bottype'] ?? null,
+            'trigger' => $normalized['trigger'],
+            'trigger_at' => $normalized['trigger_at'],
+            'policy' => $normalized['policy'],
+            'reset_usage' => $normalized['reset_usage'],
+            'payment_ref' => (string) (($rxOptions['reservation']['payment_ref'] ?? '') ?: ($rxOptions['ref'] ?? '')),
+            'fulfillment' => array(
+                'product_name' => (string) ($product['name_product'] ?? ($invoice['name_product'] ?? '')),
+                'inbounds' => $product['inbounds'] ?? null,
+                'panel_type' => (string) $panel['type'],
+                'source' => (string) ($rxOptions['source'] ?? ''),
+            ),
+        ));
+        if (empty($registered['ok'])) {
+            return array(
+                'status' => false,
+                'code' => (string) ($registered['code'] ?? 'queued_renewal_insert_failed'),
+                'no_mutation' => true,
+                'msg' => (string) ($registered['msg'] ?? ($registered['code'] ?? 'reservation failed'))
+            );
+        }
+        return array(
+            'status' => true,
+            'queued' => true,
+            'reservation_id' => (int) $registered['id'],
+            'reservation' => array(
+                'trigger' => $normalized['trigger'],
+                'trigger_at' => $normalized['trigger_at'],
+                'policy' => $normalized['policy'],
+                'reset_usage' => $normalized['reset_usage'],
+                'trigger_label' => rxReservationTriggerLabel($normalized['trigger'], $normalized['trigger_at']),
+                'policy_label' => rxRenewalPolicyLabel($normalized['policy'], $normalized['reset_usage']),
+            ),
+        );
+    }
+
+    private function rxRenewalInvoiceRow($username, $panel)
+    {
+        global $pdo;
+        if ($pdo instanceof PDO && is_array($panel)) {
+            try {
+                $stmt = $pdo->prepare("SELECT * FROM invoice WHERE username = :username AND Service_location = :location ORDER BY time_sell DESC LIMIT 1");
+                $stmt->execute(array(':username' => (string) $username, ':location' => (string) $panel['name_panel']));
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                if (is_array($row)) {
+                    return $row;
+                }
+            } catch (Throwable $e) {
+            }
+        }
+        $row = select("invoice", "*", "username", $username, "select");
+        return is_array($row) ? $row : null;
+    }
+
+    public function rxRenewalLocalSuccess($panel, $username, $idInvoice = '')
+    {
+        $invoice = ((string) $idInvoice !== '') ? select("invoice", "*", "id_invoice", $idInvoice, "select") : null;
+        if (!is_array($invoice)) {
+            $invoice = $this->rxRenewalInvoiceRow($username, $panel);
+        }
+        if (!is_array($invoice)) {
+            return;
+        }
+        update("invoice", "notifctions", json_encode(array('volume' => false, 'time' => false)), 'id_invoice', $invoice['id_invoice']);
+        if (($panel['type'] ?? '') != "WGDashboard") {
+            update("invoice", 'user_info', null, "id_invoice", $invoice['id_invoice']);
+        }
+        update("invoice", 'uuid', null, "id_invoice", $invoice['id_invoice']);
+        if (($invoice['Status'] ?? '') !== 'disablebyadmin') {
+            update("invoice", 'Status', "active", "id_invoice", $invoice['id_invoice']);
+        }
+    }
+
+    public function applyStoredRenewalPlan($name_panel, $username, array $plan, array $opts = array())
+    {
+        $panel = $this->loadPanel((string) $name_panel, 'name_panel');
+        if (!is_array($panel)) {
+            return array('status' => false, 'code' => 'panel_not_found', 'no_mutation' => true, 'msg' => 'Panel Not Found');
+        }
+        $data_user = $this->DataUser($panel['name_panel'], $username);
+        if (!is_array($data_user) || ($data_user['status'] ?? '') == "Unsuccessful") {
+            return array('status' => false, 'code' => 'panel_read_failed', 'no_mutation' => true, 'msg' => is_array($data_user) ? ($data_user['msg'] ?? '') : '');
+        }
+        $invoice = !empty($opts['id_invoice']) ? select("invoice", "*", "id_invoice", $opts['id_invoice'], "select") : null;
+        if (!is_array($invoice)) {
+            $invoice = $this->rxRenewalInvoiceRow($username, $panel);
+        }
+        $code = rxRenewalNormalizeProductCode($opts['code_product'] ?? '');
+        $product = ($code !== '' && $code !== 'custom_volume') ? select("product", "*", "code_product", $code, "select") : array();
+        if (!is_array($product)) {
+            $product = array();
+        }
+        $fulfillment = is_array($opts['fulfillment'] ?? null) ? $opts['fulfillment'] : array();
+        if (empty($product['inbounds']) && !empty($fulfillment['inbounds'])) {
+            $product['inbounds'] = $fulfillment['inbounds'];
+        }
+        return $this->applyRenewalPlan($panel, $data_user, $invoice, $product, $plan, array_merge($opts, array('username' => (string) $username)));
+    }
+
+    public function applyRenewalPlan(array $panel, array $data_user, $invoice, $product, array $plan, array $opts = array())
+    {
+        $username = (string) ($opts['username'] ?? ($data_user['username'] ?? ''));
+        $invoice = is_array($invoice) ? $invoice : array();
+        $product = is_array($product) ? $product : array();
+        $idInvoice = (string) ($invoice['id_invoice'] ?? ($opts['id_invoice'] ?? ''));
+        $serviceKey = (string) ($opts['service_key'] ?? rx_rn_service_key($idInvoice, $panel['code_panel'] ?? '', $username));
+        $opId = (string) ($opts['op_id'] ?? rx_pf_new_token());
+        $lockOwner = isset($opts['lock_owner']) ? (string) $opts['lock_owner'] : '';
+        $ownLock = $lockOwner === '';
+        $source = (string) ($opts['source'] ?? 'wallet');
+        $diag = array(
+            'operation_id' => $opId,
+            'service_key' => $serviceKey,
+            'username' => $username,
+            'panel' => (string) $panel['name_panel'],
+            'panel_type' => (string) $panel['type'],
+            'method' => (string) ($opts['method'] ?? ''),
+            'policy' => (string) ($plan['policy'] ?? ''),
+            'source' => $source,
+            'ref' => (string) ($opts['ref'] ?? ''),
+        );
+        $before = array(
+            'data_limit' => rx_pf_int($plan['before_data_limit'] ?? 0),
+            'expire' => rx_pf_int($plan['before_expire'] ?? 0),
+            'used_traffic' => rx_pf_int($plan['before_used_traffic'] ?? 0),
+            'status' => (string) ($plan['before_status'] ?? ''),
+        );
+        $target = array(
+            'data_limit' => rx_pf_int($plan['data_limit'] ?? 0),
+            'expire' => rx_pf_int($plan['expire'] ?? 0),
+            'used_traffic' => rx_pf_int($plan['target_used_traffic'] ?? 0),
+            'reset_usage' => !empty($plan['reset_usage']),
+            'pending_duration' => $plan['target_pending_duration'] ?? null,
+        );
+        if ($ownLock && !rx_rn_lock_acquire($serviceKey, $opId)) {
+            return array('status' => false, 'code' => 'renewal_in_progress', 'no_mutation' => true, 'operation_id' => $opId, 'msg' => 'another renewal operation is running for this service');
+        }
+        try {
+            if (!rx_rn_op_start(array(
+                'op_id' => $opId,
+                'source' => $source,
+                'ref' => $opts['ref'] ?? null,
+                'service_key' => $serviceKey,
+                'username' => $username,
+                'name_panel' => (string) $panel['name_panel'],
+                'id_invoice' => $idInvoice,
+                'method' => $opts['method'] ?? null,
+                'policy' => $plan['policy'] ?? null,
+                'before' => $before,
+                'target' => $plan,
+            ))) {
+                return array('status' => false, 'code' => 'operation_persist_failed', 'no_mutation' => true, 'operation_id' => $opId, 'msg' => 'renewal operation could not be persisted');
+            }
+            rx_pf_log('RENEWAL_APPLY_START', 'Applying renewal plan', $diag + array('before' => $before, 'target' => $target));
+            $resetDone = false;
+            if (!empty($plan['reset_usage']) && rx_pf_int($data_user['used_traffic'] ?? 0) > 0) {
+                rx_rn_op_update($opId, array('stage' => 'reset_sent'));
+                $reset = $this->ResetUserDataUsage($username, $panel['name_panel']);
+                if (!is_array($reset) || empty($reset['status'])) {
+                    $resetMsg = is_array($reset) ? (is_scalar($reset['msg'] ?? null) ? (string) $reset['msg'] : json_encode($reset['msg'] ?? '')) : '';
+                    $probe = rx_pf_panel_snapshot($this, (string) $panel['name_panel'], $username, (string) $panel['type']);
+                    if (empty($probe['ok']) || empty($probe['exists'])) {
+                        return $this->rxRenewalUncertain($opId, $plan, $before, null, 'reset_result_unknown: ' . $resetMsg, $diag);
+                    }
+                    $probeUsed = rx_pf_int($probe['used_traffic']);
+                    if ($probeUsed > RX_RN_USAGE_SLACK && $probeUsed + RX_RN_USAGE_SLACK > rx_pf_int($data_user['used_traffic'] ?? 0)) {
+                        rx_rn_op_update($opId, array('state' => 'failed', 'stage' => 'reset_failed', 'last_error' => $resetMsg));
+                        rx_pf_log('RENEWAL_APPLY_FAILED', 'Usage reset failed before any change', $diag + array('error' => $resetMsg));
+                        return array('status' => false, 'code' => 'reset_failed', 'no_mutation' => true, 'operation_id' => $opId, 'msg' => 'error reset : ' . $resetMsg);
+                    }
+                }
+                $resetDone = true;
+                rx_rn_op_update($opId, array('stage' => 'reset_done'));
+            }
+            rx_rn_op_update($opId, array('stage' => 'modify_sent'));
+            $write = $this->rxRenewalPanelWrite($panel, $data_user, $invoice, $product, $plan, $username);
+            if (empty($write['status'])) {
+                $writeMsg = is_scalar($write['msg'] ?? null) ? (string) $write['msg'] : json_encode($write['msg'] ?? '');
+                $probe = rx_pf_panel_snapshot($this, (string) $panel['name_panel'], $username, (string) $panel['type']);
+                $class = rxRenewalClassify($probe, $plan);
+                $untouched = !empty($probe['ok']) && !empty($probe['exists'])
+                    && rx_pf_int($probe['data_limit']) === $before['data_limit']
+                    && rx_pf_int($probe['expire']) === $before['expire']
+                    && (bool) ($probe['pending'] ?? false) === (bool) ($plan['before_pending'] ?? false);
+                if ($class === 'before' && $untouched && !$resetDone) {
+                    rx_rn_op_update($opId, array('state' => 'failed', 'stage' => 'modify_failed', 'last_error' => $writeMsg));
+                    rx_pf_log('RENEWAL_APPLY_FAILED', 'Panel rejected the renewal; service unchanged', $diag + array('error' => $writeMsg));
+                    return array('status' => false, 'code' => 'panel_write_failed', 'no_mutation' => true, 'operation_id' => $opId, 'msg' => $writeMsg);
+                }
+                if ($class === 'before') {
+                    $write = $this->rxRenewalPanelWrite($panel, $data_user, $invoice, $product, $plan, $username);
+                    if (empty($write['status'])) {
+                        return $this->rxRenewalUncertain($opId, $plan, $before, rx_pf_limits($probe), 'partial_write: ' . $writeMsg, $diag);
+                    }
+                } elseif ($class !== 'target') {
+                    return $this->rxRenewalUncertain($opId, $plan, $before, !empty($probe['ok']) ? rx_pf_limits($probe) : null, 'write_result_' . $class . ': ' . $writeMsg, $diag);
+                }
+            }
+            $verify = $this->rxRenewalVerifyLoop($panel, $username, $plan);
+            if (!empty($verify['ok'])) {
+                rx_rn_op_update($opId, array('state' => 'verified', 'stage' => 'done', 'result_state' => $verify['after'], 'last_error' => null));
+                $this->rxRenewalLocalSuccess($panel, $username, $idInvoice);
+                rx_pf_log('RENEWAL_APPLY_VERIFIED', 'Renewal verified on panel', $diag + array('before' => $before, 'target' => $target, 'after' => $verify['after']));
+                return array(
+                    'status' => true,
+                    'data' => $write['data'] ?? null,
+                    'operation_id' => $opId,
+                    'rx_renewal' => array(
+                        'plan' => $plan,
+                        'before' => $before,
+                        'target' => $target,
+                        'after' => $verify['after'],
+                        'verified' => true,
+                        'operation_id' => $opId,
+                    ),
+                );
+            }
+            return $this->rxRenewalUncertain($opId, $plan, $before, $verify['after'], 'verification_failed: ' . (string) $verify['reason'], $diag);
+        } catch (Throwable $e) {
+            return $this->rxRenewalUncertain($opId, $plan, $before, null, 'exception: ' . $e->getMessage(), $diag);
+        } finally {
+            if ($ownLock) {
+                rx_rn_lock_release($serviceKey, $opId);
+            }
+        }
+    }
+
+    private function rxRenewalVerifyLoop(array $panel, $username, array $plan)
+    {
+        $delays = defined('RX_RN_VERIFY_DELAYS') ? array_map('intval', explode(',', (string) RX_RN_VERIFY_DELAYS)) : array(0, 1, 2);
+        $result = array('ok' => false, 'reason' => 'unreadable', 'after' => null);
+        foreach ($delays as $delay) {
+            if ($delay > 0) {
+                sleep($delay);
+            }
+            $snapshot = rx_pf_panel_snapshot($this, (string) $panel['name_panel'], (string) $username, (string) $panel['type']);
+            if (empty($snapshot['ok']) || empty($snapshot['exists'])) {
+                $result = array('ok' => false, 'reason' => 'unreadable: ' . (string) ($snapshot['error'] ?? 'missing'), 'after' => null);
+                continue;
+            }
+            $verify = rxRenewalVerify($snapshot, $plan);
+            $after = rx_pf_limits($snapshot);
+            $after['status'] = (string) ($snapshot['status'] ?? '');
+            $after['pending_duration'] = $snapshot['pending_duration'] ?? null;
+            $result = array('ok' => !empty($verify['ok']), 'reason' => (string) $verify['reason'], 'after' => $after, 'checks' => $verify['checks']);
+            if (!empty($verify['ok'])) {
+                break;
+            }
+        }
+        return $result;
+    }
+
+    private function rxRenewalUncertain($opId, array $plan, array $before, $after, $reason, array $diag)
+    {
+        rx_rn_op_update($opId, array('state' => 'uncertain', 'last_error' => $reason, 'result_state' => $after, 'next_attempt_at' => time() + 120));
+        rx_pf_log('RENEWAL_APPLY_UNCERTAIN', $reason, $diag + array('before' => $before, 'target' => array('data_limit' => $plan['data_limit'] ?? null, 'expire' => $plan['expire'] ?? null, 'reset_usage' => !empty($plan['reset_usage'])), 'after' => $after));
+        if (!in_array((string) ($diag['source'] ?? ''), array('payment', 'reservation'), true)) {
+            rx_pf_alert_admin('renewal:' . $opId, 'نتیجه تمدید هنوز تأیید نشده و به‌صورت خودکار بررسی می‌شود (پنل: ' . (string) ($diag['panel'] ?? '') . ')', array('username' => (string) ($diag['username'] ?? '')));
+        }
+        return array(
+            'status' => false,
+            'pending_verification' => true,
+            'code' => 'pending_verification',
+            'operation_id' => $opId,
+            'msg' => $reason,
+            'rx_renewal' => array(
+                'plan' => $plan,
+                'before' => $before,
+                'target' => array('data_limit' => $plan['data_limit'] ?? null, 'expire' => $plan['expire'] ?? null),
+                'after' => $after,
+                'verified' => false,
+                'operation_id' => $opId,
+            ),
+        );
+    }
+
+    private function rxRenewalPanelWrite(array $panel, array $data_user, array $invoice, array $product, array $plan, $username)
+    {
+        global $pdo;
+        $data_limit_new = (int) $plan['data_limit'];
+        $time_new = (int) $plan['expire'];
+        $pending = !empty($plan['target_pending']);
+        $pendingDuration = (int) ($plan['target_pending_duration'] ?? 0);
+        $enable = !empty($plan['enable']);
+        $inbounds = is_string($panel['inbounds'] ?? null) ? json_decode($panel['inbounds']) : "{}";
+        if (isset($product['inbounds']) && $product['inbounds'] != null) {
+            $inbounds = is_string($product['inbounds']) ? json_decode($product['inbounds']) : $product['inbounds'];
+        }
         if ($panel['type'] == "remnawave") {
-            global $pdo;
             $local = remnawave_find_user($username);
             if ($local === null || empty($local['panel_user_id'])) {
                 return array('status' => false, 'msg' => 'remnawave user not found');
@@ -2430,49 +2730,81 @@ class ManagePanel
             $params = array(
                 'id' => (int) $local['panel_user_id'],
                 'expireAt' => remnawave_iso_from_timestamp($time_new),
-                'trafficLimitBytes' => (int) $data_limit_new,
+                'trafficLimitBytes' => $data_limit_new,
             );
-            $res = $mgr->updateUser($params, null, $pdo);
-            if (empty($res['ok'])) {
-                return array('status' => false, 'msg' => 'remnawave extend failed');
+            if ($enable) {
+                $params['status'] = 'ACTIVE';
             }
-            return $this->rxWithRenewalOutcome(array('status' => true), $panel['name_panel'], $username, $rxPlan);
+            $res = $mgr->updateUser($params, null, $pdo);
+            return array('status' => !empty($res['ok']), 'msg' => empty($res['ok']) ? 'remnawave extend failed' : '', 'data' => $res['data'] ?? null);
+        }
+        if ($panel['type'] == "WGDashboard") {
+            $allowResponse = allowAccessPeers($panel['name_panel'], $username);
+            if (isset($allowResponse['status']) && $allowResponse['status'] === false) {
+                return array('status' => false, 'msg' => isset($allowResponse['msg']) ? $allowResponse['msg'] : '');
+            }
+            $datauser = get_userwg($username, $panel['name_panel']);
+            if (!is_array($datauser) || (isset($datauser['status']) && $datauser['status'] === false && !isset($datauser['id']))) {
+                return array('status' => false, 'msg' => is_array($datauser) && isset($datauser['msg']) ? $datauser['msg'] : '');
+            }
+            $jobs = is_array($datauser['jobs'] ?? null) ? $datauser['jobs'] : array();
+            $fields = array();
+            if (($plan['time_mode'] ?? '') !== 'keep') {
+                $fields['date'] = $time_new > 0 ? date("Y-m-d H:i:s", $time_new) : null;
+            }
+            if (($plan['traffic_mode'] ?? '') !== 'keep') {
+                $fields['total_data'] = $data_limit_new > 0 ? $data_limit_new / pow(1024, 3) : null;
+            }
+            foreach ($fields as $field => $value) {
+                foreach ($jobs as $job) {
+                    if (($job['Field'] ?? '') !== $field) {
+                        continue;
+                    }
+                    $deleteJob = deletejob($panel['name_panel'], array("Job" => $job));
+                    if (isset($deleteJob['status']) && $deleteJob['status'] === false) {
+                        return array('status' => false, 'msg' => isset($deleteJob['msg']) ? $deleteJob['msg'] : '');
+                    }
+                }
+                if ($value !== null) {
+                    $setJob = setjob($panel['name_panel'], $field, $value, $datauser['id']);
+                    if (isset($setJob['status']) && $setJob['status'] === false) {
+                        return array('status' => false, 'msg' => isset($setJob['msg']) ? $setJob['msg'] : '');
+                    }
+                }
+            }
+            return array('status' => true);
         }
         if ($this->isPasarGuardDialect($panel)) {
             $configuredGroups = is_array($inbounds) ? $inbounds : (is_string($inbounds) ? json_decode($inbounds, true) : []);
             $existingGroups = (!empty($data_user['group_ids']) && is_array($data_user['group_ids'])) ? $data_user['group_ids'] : [];
             $mergedGroups = array_values(array_unique(array_merge($existingGroups, is_array($configuredGroups) ? $configuredGroups : [])));
             $targetGroups = !empty($mergedGroups) ? $mergedGroups : (!empty($configuredGroups) ? $configuredGroups : null);
-
             $data = array(
                 'data_limit' => $data_limit_new,
-                'expire' => ($time_new == 0 ? 0 : date('c', $time_new)),
+                'expire' => ($pending || $time_new == 0) ? 0 : date('c', $time_new),
             );
             if ($targetGroups !== null) {
                 $data['group_ids'] = $targetGroups;
             }
-            if ($invoice != false && $invoice['uuid'] != null) {
+            if (!empty($invoice['uuid'])) {
                 $data['proxy_settings'] = json_decode($invoice['uuid']);
             }
         } elseif ($panel['type'] == "marzban") {
             $configuredInbounds = is_array($inbounds) ? $inbounds : (is_string($inbounds) ? json_decode($inbounds, true) : []);
             $existingInbounds = (!empty($data_user['inbounds']) && is_array($data_user['inbounds'])) ? $data_user['inbounds'] : [];
             $mergedInbounds = is_array($configuredInbounds) ? $configuredInbounds : [];
-            if (is_array($existingInbounds)) {
-                foreach ($existingInbounds as $protocol => $tags) {
-                    if (is_array($tags)) {
-                        $currentTags = isset($mergedInbounds[$protocol]) && is_array($mergedInbounds[$protocol]) ? $mergedInbounds[$protocol] : [];
-                        $mergedInbounds[$protocol] = array_values(array_unique(array_merge($currentTags, $tags)));
-                    }
+            foreach ($existingInbounds as $protocol => $tags) {
+                if (is_array($tags)) {
+                    $currentTags = isset($mergedInbounds[$protocol]) && is_array($mergedInbounds[$protocol]) ? $mergedInbounds[$protocol] : [];
+                    $mergedInbounds[$protocol] = array_values(array_unique(array_merge($currentTags, $tags)));
                 }
             }
-            $targetInbounds = !empty($mergedInbounds) ? $mergedInbounds : $inbounds;
             $data = array(
                 'data_limit' => $data_limit_new,
-                'expire' => $time_new,
-                'inbounds' => $targetInbounds,
+                'expire' => $pending ? 0 : $time_new,
+                'inbounds' => !empty($mergedInbounds) ? $mergedInbounds : $inbounds,
             );
-            if ($invoice != false && $invoice['uuid'] != null) {
+            if (!empty($invoice['uuid'])) {
                 $data['proxies'] = json_decode($invoice['uuid'], true);
             }
         } elseif ($panel['type'] == "x-ui_single") {
@@ -2482,7 +2814,7 @@ class ManagePanel
                         'clients' => array(
                             array(
                                 "totalGB" => $data_limit_new,
-                                "expiryTime" => $time_new * 1000,
+                                "expiryTime" => $pending ? -1 * $pendingDuration * 1000 : $time_new * 1000,
                                 "enable" => true,
                             )
                         ),
@@ -2491,151 +2823,38 @@ class ManagePanel
                     )
                 ),
             );
-        } elseif ($panel['type'] == "WGDashboard") {
-            if ($data_user['status'] == "limited" || $data_user['status'] == "expired") {
-                $reset = $this->ResetUserDataUsage($username, $panel['name_panel']);
-                if ($reset['status'] == false) {
-                    return array(
-                        'status' => false,
-                        'msg' => 'error reset : ' . $reset['msg']
-                    );
-                }
-            }
-            $allowResponse = allowAccessPeers($panel['name_panel'], $username);
-            if (isset($allowResponse['status']) && $allowResponse['status'] === false) {
-                return array(
-                    'status' => false,
-                    'msg' => isset($allowResponse['msg']) ? $allowResponse['msg'] : ''
-                );
-            }
-            $datauser = get_userwg($username, $panel['name_panel']);
-            if (isset($datauser['status']) && $datauser['status'] === false && !isset($datauser['id'])) {
-                return array(
-                    'status' => false,
-                    'msg' => isset($datauser['msg']) ? $datauser['msg'] : ''
-                );
-            }
-            $count = 0;
-            foreach ($datauser['jobs'] as $jobsvolume) {
-                if ($jobsvolume['Field'] == "date") {
-                    break;
-                }
-                $count += 1;
-            }
-            $datam = array(
-                "Job" => $datauser['jobs'][$count],
-            );
-            $deleteJob = deletejob($panel['name_panel'], $datam);
-            if (isset($deleteJob['status']) && $deleteJob['status'] === false) {
-                return array(
-                    'status' => false,
-                    'msg' => isset($deleteJob['msg']) ? $deleteJob['msg'] : ''
-                );
-            }
-            $count = 0;
-            foreach ($datauser['jobs'] as $jobsvolume) {
-                if ($jobsvolume['Field'] == "total_data") {
-                    break;
-                }
-                $count += 1;
-            }
-            $datam = array(
-                "Job" => $datauser['jobs'][$count],
-            );
-            $deleteJob = deletejob($panel['name_panel'], $datam);
-            if (isset($deleteJob['status']) && $deleteJob['status'] === false) {
-                return array(
-                    'status' => false,
-                    'msg' => isset($deleteJob['msg']) ? $deleteJob['msg'] : ''
-                );
-            }
-            $rxTimeNewTs = (int) $time_new;
-            $time_new = date("Y-m-d H:i:s", $time_new);
-            if ($time_day != 0 && $rxTimeNewTs > 0) {
-                $setJob = setjob($panel['name_panel'], "date", $time_new, $datauser['id']);
-                if (isset($setJob['status']) && $setJob['status'] === false) {
-                    return array(
-                        'status' => false,
-                        'msg' => isset($setJob['msg']) ? $setJob['msg'] : ''
-                    );
-                }
-            }
-            if ($new_limit != 0 && $data_limit_new > 0) {
-                $setJob = setjob($panel['name_panel'], "total_data", $data_limit_new / pow(1024, 3), $datauser['id']);
-                if (isset($setJob['status']) && $setJob['status'] === false) {
-                    return array(
-                        'status' => false,
-                        'msg' => isset($setJob['msg']) ? $setJob['msg'] : ''
-                    );
-                }
-            }
-            return $this->rxWithRenewalOutcome(array(
-                'status' => true
-            ), $panel['name_panel'], $username, $rxPlan);
         } elseif ($panel['type'] == "guard") {
-            $limitExpire = guardNormalizeExpire($time_new);
             $serviceIdsSource = isset($data_user['service_ids']) ? $data_user['service_ids'] : ($panel['guard_service_ids'] ?? null);
             $serviceResult = guardResolveServiceIds($panel['name_panel'], $serviceIdsSource);
             if ($serviceResult['status'] === false) {
-                return array(
-                    'status' => false,
-                    'msg' => $serviceResult['msg']
-                );
+                return array('status' => false, 'msg' => $serviceResult['msg']);
             }
             $data = array(
                 "limit_usage" => $data_limit_new,
-                "limit_expire" => $limitExpire,
+                "limit_expire" => guardNormalizeExpire($time_new),
                 "service_ids" => $serviceResult['service_ids']
             );
         } elseif ($panel['type'] == "rebecca") {
             $data = array(
                 'data_limit' => $data_limit_new,
-                'expire' => $time_new,
+                'expire' => $pending ? 0 : $time_new,
             );
+        } else {
+            return array('status' => false, 'msg' => 'unsupported panel type for renewal');
+        }
+        if (in_array($panel['type'], array('marzban', 'pasarguard', 'rebecca'), true)) {
+            if ($pending) {
+                $data['status'] = 'on_hold';
+                $data['on_hold_expire_duration'] = $pendingDuration;
+            } elseif ($enable) {
+                $data['status'] = 'active';
+            }
         }
         $extend = $this->Modifyuser($username, $panel['name_panel'], $data);
-        if ($extend['status'] == false) {
-            return array(
-                'status' => false,
-                'msg' => $extend['msg']
-            );
+        if (!is_array($extend) || empty($extend['status'])) {
+            return array('status' => false, 'msg' => is_array($extend) ? ($extend['msg'] ?? '') : 'invalid panel response');
         }
-        return $this->rxWithRenewalOutcome($extend, $panel['name_panel'], $username, $rxPlan);
-    }
-
-    private function rxWithRenewalOutcome($result, $name_panel, $username, array $plan)
-    {
-        if (!is_array($result)) {
-            $result = array('status' => true, 'panel_output' => $result);
-        }
-        $before = array(
-            'data_limit' => $plan['before_data_limit'] ?? null,
-            'expire' => $plan['before_expire'] ?? null,
-            'used_traffic' => $plan['before_used_traffic'] ?? 0,
-        );
-        $target = array(
-            'data_limit' => $plan['data_limit'] ?? 0,
-            'expire' => $plan['expire'] ?? 0,
-        );
-        $after = null;
-        $verified = false;
-        try {
-            $snapshot = rx_pf_snapshot_from_datauser($this->DataUser($name_panel, $username));
-            if (!empty($snapshot['ok']) && !empty($snapshot['exists'])) {
-                $after = rx_pf_limits($snapshot);
-                $verified = rx_pf_state_matches($snapshot, $target);
-            }
-        } catch (Throwable $e) {
-            $after = null;
-        }
-        $result['rx_renewal'] = array(
-            'plan' => $plan,
-            'before' => $before,
-            'target' => $target,
-            'after' => $after,
-            'verified' => $verified,
-        );
-        return $result;
+        return array('status' => true, 'data' => $extend['data'] ?? null);
     }
     function extra_volume($username_account, $code_panel, $limit_volume_new, $rxTarget = null)
     {

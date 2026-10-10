@@ -417,19 +417,25 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     $rxExtendMethodGuide = "🔋 روش تمدید را انتخاب کنید.
 
 "
-        . "همه روش‌ها زمان و حجم باقی‌مانده مشتری را حفظ می‌کنند و هیچ‌کدام مقدار پرداخت‌شده را حذف نمی‌کند:
+        . "♻️ «ریست حجم و زمان»: مصرف صفر می‌شود و حجم و زمان باقی‌مانده حذف می‌شود؛ حجم کل = فقط حجم خرید؛ انقضا = زمان اجرا + روزهای خرید.
 
 "
-        . "✅ «اضافه شدن زمان و حجم به ماه بعد» و «ریست زمان و اضافه کردن حجم قبلی» (پیشنهادی): مصرف حفظ می‌شود؛ حجم کل = حجم فعلی + حجم خرید؛ انقضا = انقضای فعلی + روزهای خرید.
+        . "➕ «اضافه شدن زمان و حجم به ماه بعد»: مصرف حفظ می‌شود؛ حجم باقی‌مانده + حجم خرید قابل استفاده است (حجم کل = مصرف + باقی‌مانده + خرید)؛ انقضا = انقضای فعلی + روزهای خرید.
 
 "
-        . "♻️ «ریست حجم و زمان»، «ریست شدن حجم و اضافه شدن زمان» و «اضافه شدن زمان و تبدیل حجم کل به حجم باقی مانده»: مصرف صفر می‌شود؛ حجم کل = حجم باقی‌مانده + حجم خرید؛ انقضا = انقضای فعلی + روزهای خرید.
+        . "🔁 «ریست زمان و اضافه کردن حجم قبلی»: مصرف حفظ می‌شود؛ حجم باقی‌مانده + حجم خرید؛ زمان باقی‌مانده حذف و انقضا = زمان اجرا + روزهای خرید.
 
 "
-        . "📌 «رزرو اشتراک»: تمدید رزرو می‌شود و پس از پایان سرویس فعلی فعال می‌گردد.
+        . "🔂 «ریست شدن حجم و اضافه شدن زمان»: مصرف صفر و حجم باقی‌مانده حذف می‌شود؛ حجم کل = فقط حجم خرید؛ انقضا = انقضای فعلی + روزهای خرید.
 
 "
-        . "برای سرویس منقضی‌شده، روزهای خرید از زمان تمدید محاسبه می‌شود.";
+        . "🔄 «اضافه شدن زمان و تبدیل حجم کل به حجم باقی مانده»: مصرف صفر می‌شود اما حجم باقی‌مانده حذف نمی‌شود؛ حجم کل = حجم باقی‌مانده + حجم خرید؛ انقضا = انقضای فعلی + روزهای خرید.
+
+"
+        . "📌 «رزرو اشتراک»: سرویس فعلی تغییر نمی‌کند؛ مشتری زمان فعال‌سازی (اتمام حجم یا انقضا، فقط اتمام حجم، فقط انقضا، تاریخ مشخص یا اجرای فوری) و سیاست اجرا را انتخاب می‌کند و حجم و زمان باقی‌مانده در لحظه فعال‌سازی محاسبه می‌شود.
+
+"
+        . "ℹ️ مصرف بیش از سقف قبلی هیچ‌گاه از حجم خریداری‌شده کم نمی‌شود. برای سرویس منقضی‌شده، روزهای خرید از زمان اجرا محاسبه و سرویس دوباره فعال می‌شود. سرویسی که توسط مدیر غیرفعال شده تمدید خودکار نمی‌شود.";
     nm_adminInstantReply($from_id, $rxExtendMethodGuide, $Methodextend, 'HTML');
     step('updateextendmethod', $from_id);
 } elseif ($user['step'] == "updateextendmethod") {
@@ -5835,15 +5841,28 @@ elseif ($text == "🫣 مخفی پنل برای کاربر" && $adminrulecheck['
         return;
     }
     deletemessage($from_id, $message_id);
-    $extend = $ManagePanel->extend($marzban_list_get['Methodextend'], $prodcut['Volume_constraint'], $prodcut['Service_time'], $nameloc['username'], $prodcut['code_product'], $marzban_list_get['code_panel']);
+    $rxAdminRef = 'admin:' . $from_id . ':' . bin2hex(random_bytes(4));
+    $extend = $ManagePanel->extend($marzban_list_get['Methodextend'], $prodcut['Volume_constraint'], $prodcut['Service_time'], $nameloc['username'], $prodcut['code_product'], $marzban_list_get['code_panel'], null, [
+        'source' => 'admin',
+        'ref' => $rxAdminRef,
+        'id_user' => $nameloc['id_user'],
+        'price' => 0,
+        'reservation' => ['payment_ref' => $rxAdminRef],
+    ]);
+    $rxAdminPending = rxRenewalIsPending($extend);
+    if ($rxAdminPending) {
+        nm_adminInstantReply($from_id, rxRenewalText('pending_verification') . "\n\n🧾 " . (string) ($extend['operation_id'] ?? ''), null, 'HTML');
+        return;
+    }
     if ($extend['status'] == false) {
         $extend['msg'] = rx_panel_error_text($extend['msg'] ?? null, $extend['detail'] ?? null);
         $textreports = "
         خطای تمدید سرویس
 <blockquote>نام پنل : {$marzban_list_get['name_panel']}</blockquote>
 <blockquote>نام کاربری سرویس : {$nameloc['username']}</blockquote>
+<blockquote>کد خطا : " . htmlspecialchars((string) ($extend['code'] ?? ''), ENT_QUOTES, 'UTF-8') . "</blockquote>
 <blockquote>دلیل خطا : {$extend['msg']}</blockquote>";
-        $rxAdminExtendMsg = "❌خطایی در تمدید سرویس رخ داده با پشتیبانی در ارتباط باشید";
+        $rxAdminExtendMsg = rxRenewalFailureText($extend, "❌خطایی در تمدید سرویس رخ داده با پشتیبانی در ارتباط باشید");
         if (($extend['code'] ?? '') === 'manual_stock_empty') {
             $rxAdminExtendMsg = "❌ موجودی انبار فروش دستی برای این محصول تمام شده است.";
         } elseif (($extend['code'] ?? '') === 'queued_renewal_exists') {
@@ -5873,10 +5892,15 @@ elseif ($text == "🫣 مخفی پنل برای کاربر" && $adminrulecheck['
     $output_json = json_encode($extend);
     $stmt->bindParam(':output', $output_json, PDO::PARAM_STR);
     $stmt->execute();
-    update("invoice", "Status", "active", "id_invoice", $id_invoice);
     $rxAdminExtendThanks = $textbotlang['users']['extend']['thanks'];
     if (!empty($extend['queued'])) {
-        $rxAdminExtendThanks .= "\n\n⏳ این بسته هم‌اکنون فعال نشد. به محض اتمام حجم یا زمان سرویس فعلی، این بسته به‌صورت خودکار فعال خواهد شد.";
+        $rxAdminExtendThanks .= "\n\n" . rxRenewalText('reservation_title');
+        if (is_array($extend['reservation'] ?? null)) {
+            $rxAdminExtendThanks .= "\n" . rxRenewalText('reservation_trigger', ['label' => (string) $extend['reservation']['trigger_label']]) . "\n" . rxRenewalText('reservation_policy', ['label' => (string) $extend['reservation']['policy_label']]);
+        }
+    } elseif (($nameloc['Status'] ?? '') !== 'disablebyadmin') {
+        update("invoice", "Status", "active", "id_invoice", $id_invoice);
+        $rxAdminExtendThanks = rxRenewalDecorateSuccess($rxAdminExtendThanks, $extend, (string) $nameloc['username'], (string) ($marzban_list_get['name_panel'] ?? ''));
     }
     nm_adminInstantReply($from_id, $rxAdminExtendThanks, null, 'HTML');
     $text_report = "⭕️ ادمین سرویس کاربر را تمدید کرد.

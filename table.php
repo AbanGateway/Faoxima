@@ -2090,6 +2090,11 @@ try {
         ['dyn_queued_renewal_activated_tpl', "با سلام خدمت شما کاربر گرامی 👋\n✅ رزرو اشتراک سرویس {username} فعال شد و حجم و زمان سرویس شما تمدید گردید."],
         ['dyn_errors_queued_renewal_exists', "❌ یک رزرو اشتراک برای این سرویس در انتظار فعال‌سازی است. مبلغی از حساب شما کسر نشد."]
     ];
+    if (function_exists('rxRenewalTextDefaults')) {
+        foreach (rxRenewalTextDefaults() as $rxRenewalTextKey => $rxRenewalTextValue) {
+            $insertQueries[] = ['dyn_renewal_' . $rxRenewalTextKey, $rxRenewalTextValue];
+        }
+    }
     if (!$table_exists) {
         $result = $connect->query("CREATE TABLE textbot (
         id_text varchar(600) PRIMARY KEY NOT NULL,
@@ -2801,29 +2806,15 @@ try {
     $table_exists = ($result->num_rows > 0);
 
     if (!$table_exists) {
-        $result = $connect->query("CREATE TABLE queued_renewal (
-        id INT(11) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        id_user varchar(500) NOT NULL,
-        username varchar(1000) NOT NULL,
-        name_panel varchar(500) NOT NULL,
-        code_panel varchar(500) NOT NULL,
-        code_product varchar(500) NOT NULL,
-        new_limit_gb varchar(200) NOT NULL,
-        time_day varchar(200) NOT NULL,
-        price varchar(200) NOT NULL,
-        id_invoice varchar(500) NULL,
-        status varchar(200) NOT NULL DEFAULT 'pending',
-        bottype varchar(200) NULL,
-        created_at varchar(200) NOT NULL,
-        applied_at varchar(200) NULL,
-        output TEXT NULL,
-        INDEX idx_queued_renewal_username_status (username(191), status(50)))
-        ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci");
+        $result = $connect->query(rx_rn_queued_table_ddl());
         if (!$result) {
             error_log("[table.php] table queued_renewal: " . mysqli_error($connect));
         }
     } else {
         rxSafeAddIndex($connect, "queued_renewal", "idx_queued_renewal_username_status", "username", 191);
+    }
+    if (!rx_rn_ensure_schema()) {
+        error_log("[table.php] renewal schema migration failed");
     }
 } catch (Exception $e) {
     error_log('[panels] ' . $e->getMessage());

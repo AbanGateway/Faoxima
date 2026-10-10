@@ -2120,6 +2120,10 @@ $nameconfig";
         ];
         $textinfo = strtr($textinfo_tpl, $textinfo_replacements);
         $textinfo = "$textinfo\n$userpassword\n$nameconfig\n\n$textconnect\n\n$rwChangelinkHint";
+        $rxReservationSummary = function_exists('rxReservationSummaryForService') ? rxReservationSummaryForService((string) $nameloc['username'], (string) $nameloc['Service_location'], (string) $nameloc['id_invoice']) : null;
+        if (is_array($rxReservationSummary)) {
+            $textinfo .= "\n\n" . htmlspecialchars((string) $rxReservationSummary['text'], ENT_QUOTES, 'UTF-8');
+        }
     }
     if (($marzban['type'] ?? '') == "remnawave") {
         $rwLight = !empty($DataUserOut['is_online']) ? '🟢 آنلاین' : '🔴 آفلاین';
@@ -3210,7 +3214,15 @@ $nameconfig";
     }
     fx_quote_store($from_id, fx_quote_context_key('renew', (string) $nameloc['id_invoice'] . '|' . (string) $product['code_product']), fx_finalize_amount(fx_apply_user_discount($product['price_product'], $user['pricediscount']), $marzban_list_get, $fxRenewKinds), $marzban_list_get, $fxRenewKinds);
     $volumeextend = intval($product['Volume_constraint']) == 0 ? $textbotlang['users']['stateus']['Unlimited'] : $product['Volume_constraint'] . ' گیگ';
-    $rxRenewPreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $nameloc['username'], $product['Volume_constraint'], $product['Service_time']);
+    $rxReservationUi = rxReservationUiEnabled($marzban_list_get);
+    if ($rxReservationUi) {
+        $rxReservationBuilt = rxReservationBuildView($ManagePanel, $marzban_list_get, $nameloc, null, $product['Volume_constraint'], $product['Service_time']);
+        savedata("save", "rsv", $rxReservationBuilt['selection']);
+        $rxRenewPreview = $rxReservationBuilt['preview'];
+        $rxRenewPreview['text'] = !empty($rxRenewPreview['blocked']) ? $rxRenewPreview['text'] : '';
+    } else {
+        $rxRenewPreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $nameloc['username'], $product['Volume_constraint'], $product['Service_time'], ['id_invoice' => (string) $nameloc['id_invoice']]);
+    }
     if (!empty($rxRenewPreview['blocked'])) {
         $keyboardextend = json_encode([
             'inline_keyboard' => [
@@ -3233,6 +3245,54 @@ $nameconfig";
         sendmessage($from_id, $textextend, $keyboardextend, 'HTML');
     } else {
         Editmessagetext($from_id, $message_id, $textextend, $keyboardextend);
+    }
+    if ($rxReservationUi && empty($rxRenewPreview['blocked'])) {
+        sendmessage($from_id, $rxReservationBuilt['view']['text'], $rxReservationBuilt['view']['keyboard'], 'HTML');
+    }
+} elseif (in_array($datain, ['rsvt', 'rsvp', 'rsvu'], true)) {
+    $userdate = json_decode($user['Processing_value'], true);
+    $nameloc = is_array($userdate) ? select("invoice", "*", "id_invoice", $userdate['id_invoice'] ?? '', "select") : false;
+    $marzban_list_get = is_array($nameloc) ? select("marzban_panel", "*", "name_panel", $nameloc['Service_location'], "select") : false;
+    if (!is_array($nameloc) || !rxReservationUiEnabled($marzban_list_get)) {
+        sendmessage($from_id, $datatextbot['dyn_errors_extend_restart_process'] ?? "❌ خطایی رخ داده است مراحل تمدید را از اول انجام دهید.", $keyboard, 'HTML');
+        return;
+    }
+    $rxSelection = rxReservationSelectionFromData($userdate);
+    $rxProbe = rx_pf_panel_snapshot($ManagePanel, (string) $marzban_list_get['name_panel'], (string) $nameloc['username'], (string) $marzban_list_get['type']);
+    $rxProbe = !empty($rxProbe['ok']) && !empty($rxProbe['exists']) ? $rxProbe : null;
+    if ($datain == 'rsvt') {
+        $rxSelection['trigger'] = rxReservationNextTrigger($rxSelection['trigger'], $rxProbe);
+    } elseif ($datain == 'rsvp') {
+        $rxSelection['policy'] = rxReservationNextPolicy($rxSelection['policy']);
+        $rxSelection['reset_usage'] = $rxSelection['reset_usage'] && rxRenewalPolicyAllowsUsageReset($rxSelection['policy']);
+    } else {
+        $rxSelection['reset_usage'] = !$rxSelection['reset_usage'] && rxRenewalPolicyAllowsUsageReset($rxSelection['policy']);
+    }
+    savedata("save", "rsv", $rxSelection);
+    $rxReservationBuilt = rxReservationBuildView($ManagePanel, $marzban_list_get, $nameloc, $rxSelection, $userdate['data_limit'] ?? 0, $userdate['time'] ?? 0);
+    Editmessagetext($from_id, $message_id, $rxReservationBuilt['view']['text'], $rxReservationBuilt['view']['keyboard']);
+} elseif ($datain == 'rsvd') {
+    sendmessage($from_id, rxRenewalText('reservation_date_prompt'), $backuser, 'HTML');
+    step('rsv_get_date', $from_id);
+} elseif ($user['step'] == 'rsv_get_date') {
+    if (!isset($update['message']) && empty($text)) { return; }
+    $userdate = json_decode($user['Processing_value'], true);
+    $rxTriggerAt = rxReservationParseDate($text, time());
+    if ($rxTriggerAt === null) {
+        sendmessage($from_id, rxRenewalText('reason_trigger_date_invalid'), $backuser, 'HTML');
+        return;
+    }
+    $rxSelection = rxReservationSelectionFromData($userdate);
+    $rxSelection['trigger'] = 'date';
+    $rxSelection['trigger_at'] = $rxTriggerAt;
+    savedata("save", "rsv", $rxSelection);
+    step('home', $from_id);
+    sendmessage($from_id, rxRenewalText('reservation_date_saved', ['date' => rxRenewalFormatExpire($rxTriggerAt)]), $keyboard, 'HTML');
+    $nameloc = is_array($userdate) ? select("invoice", "*", "id_invoice", $userdate['id_invoice'] ?? '', "select") : false;
+    $marzban_list_get = is_array($nameloc) ? select("marzban_panel", "*", "name_panel", $nameloc['Service_location'], "select") : false;
+    if (is_array($nameloc) && rxReservationUiEnabled($marzban_list_get)) {
+        $rxReservationBuilt = rxReservationBuildView($ManagePanel, $marzban_list_get, $nameloc, $rxSelection, $userdate['data_limit'] ?? 0, $userdate['time'] ?? 0);
+        sendmessage($from_id, $rxReservationBuilt['view']['text'], $rxReservationBuilt['view']['keyboard'], 'HTML');
     }
 } elseif ($datain == "discountextend") {
     sendmessage($from_id, $textbotlang['users']['Discount']['getcodesell'], $backuser, 'HTML');
@@ -3267,7 +3327,7 @@ $nameconfig";
     $custompricevalue = fx_adjust_base_toman($eextraprice[$user['agent']], $marzban_list_get, 'custom_volume');
     $eextraprice = json_decode($marzban_list_get['pricecustomtime'], true);
     $customtimevalueprice = fx_adjust_base_toman($eextraprice[$user['agent']], $marzban_list_get, 'custom_time');
-    if ($nameloc['name_product'] == "🛍 حجم دلخواه" || $nameloc['name_product'] == "⚙️ سرویس دلخواه") {
+    if ($nameloc['name_product'] == "🛍 حجم دلخواه" || $nameloc['name_product'] == "⚙️ سرویس دلخواه" || rxRenewalIsCustomCode($userdate['code_product'] ?? '')) {
         $info_product['code_product'] = "pre";
         $info_product['name_product'] = $nameloc['name_product'];
         $info_product['price_product'] = ($userdate['data_limit'] * $custompricevalue) + ($userdate['time'] * $customtimevalueprice);
@@ -3281,7 +3341,7 @@ $nameconfig";
         $stmt->execute();
         $info_product = $stmt->fetch(PDO::FETCH_ASSOC);
     }
-    $fxRenewCustom = ($nameloc['name_product'] == "🛍 حجم دلخواه" || $nameloc['name_product'] == "⚙️ سرویس دلخواه");
+    $fxRenewCustom = ($nameloc['name_product'] == "🛍 حجم دلخواه" || $nameloc['name_product'] == "⚙️ سرویس دلخواه" || rxRenewalIsCustomCode($userdate['code_product'] ?? ''));
     $fxRenewKinds = $fxRenewCustom ? ['custom_volume', 'custom_time'] : 'product';
     if (!$fxRenewCustom && is_array($info_product)) {
         $info_product = fx_apply_to_product($info_product, $marzban_list_get);
@@ -3298,7 +3358,7 @@ $nameconfig";
         $info_product['price_product'] = $info_product['price_product'] - $result;
     }
     $info_product['price_product'] = round($info_product['price_product']);
-    $rxRenewPreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $nameloc['username'], $info_product['Volume_constraint'], $info_product['Service_time']);
+    $rxRenewPreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $nameloc['username'], $info_product['Volume_constraint'], $info_product['Service_time'], ['reservation' => rxReservationUiEnabled($marzban_list_get) ? rxReservationSelectionFromData($userdate) : null, 'id_invoice' => (string) $nameloc['id_invoice']]);
     if (intval($info_product['Service_time']) == 0)
         $info_product['Service_time'] = $textbotlang['users']['stateus']['Unlimited'];
     if (intval($info_product['Volume_constraint']) == 0)
@@ -3349,7 +3409,7 @@ $nameconfig";
     $eextraprice = json_decode($marzban_list_get['pricecustomtime'], true);
     $customtimevalueprice = fx_adjust_base_toman($eextraprice[$user['agent']], $marzban_list_get, 'custom_time');
     $randomString = bin2hex(random_bytes(2));
-    if ($nameloc['name_product'] == "🛍 حجم دلخواه" || $nameloc['name_product'] == "⚙️ سرویس دلخواه") {
+    if ($nameloc['name_product'] == "🛍 حجم دلخواه" || $nameloc['name_product'] == "⚙️ سرویس دلخواه" || rxRenewalIsCustomCode($userdata['code_product'] ?? '')) {
         $prodcut['code_product'] = "custom_volume";
         $prodcut['name_product'] = $nameloc['name_product'];
         $prodcut['price_product'] = ($userdata['data_limit'] * $custompricevalue) + ($userdata['time'] * $customtimevalueprice);
@@ -3370,7 +3430,7 @@ $nameconfig";
         sendmessage($from_id, $datatextbot['dyn_errors_renewal_failed_restart'] ?? "❌ تمدید با خطا مواجه گردید مراحل تمدید را مجددا انجام دهید.", null, 'HTML');
         return;
     }
-    $fxRenewCustom = ($nameloc['name_product'] == "🛍 حجم دلخواه" || $nameloc['name_product'] == "⚙️ سرویس دلخواه");
+    $fxRenewCustom = ($nameloc['name_product'] == "🛍 حجم دلخواه" || $nameloc['name_product'] == "⚙️ سرویس دلخواه" || rxRenewalIsCustomCode($userdata['code_product'] ?? ''));
     $fxRenewKinds = $fxRenewCustom ? ['custom_volume', 'custom_time'] : 'product';
     if (!$fxRenewCustom) {
         $prodcut = fx_apply_to_product($prodcut, $marzban_list_get);
@@ -3420,6 +3480,20 @@ $nameconfig";
     $fxRenewBasePrice = $fxRenewCustom ? fx_custom_base_price($marzban_list_get, $user['agent'], $userdata['data_limit'] ?? 0, $userdata['time'] ?? 0) : ($prodcut['fx_base_price'] ?? $prodcut['price_product']);
     $fxRenewSnapshot = fx_pricing_snapshot($marzban_list_get, $fxRenewKinds, $fxRenewBasePrice, $pricelastextend, (float) $prodcut['price_product'] - (float) $pricelastextend, ['product' => (string) ($prodcut['code_product'] ?? '')]);
     $DataUserOut = $ManagePanel->DataUser($nameloc['Service_location'], $nameloc['username']);
+    $rxConfirmSnapshot = rx_pf_snapshot_from_datauser($DataUserOut, (string) ($marzban_list_get['type'] ?? ''));
+    $rxReservationSelection = rxReservationUiEnabled($marzban_list_get) ? rxReservationSelectionFromData($userdata) : null;
+    $rxConfirmPreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $nameloc['username'], $prodcut['Volume_constraint'], $prodcut['Service_time'], ['reservation' => $rxReservationSelection, 'snapshot' => $rxConfirmSnapshot, 'id_invoice' => (string) $nameloc['id_invoice']]);
+    if (!empty($rxConfirmPreview['blocked'])) {
+        sendmessage($from_id, (string) $rxConfirmPreview['text'], null, 'HTML');
+        return;
+    }
+    if (is_array($rxReservationSelection)) {
+        $rxSelectionCheck = rxReservationNormalizeSelection($rxReservationSelection, !empty($rxConfirmSnapshot['ok']) && !empty($rxConfirmSnapshot['exists']) ? $rxConfirmSnapshot : null, time());
+        if (empty($rxSelectionCheck['ok'])) {
+            sendmessage($from_id, rxRenewalReasonText((string) $rxSelectionCheck['reason'], $rxSelectionCheck), null, 'HTML');
+            return;
+        }
+    }
     if ($user['Balance'] < $pricelastextend && $user['agent'] != "n2" && intval($pricelastextend) != 0) {
         $marzbandirectpay = panel_feature_enabled($nameloc['Service_location'], 'directbuy') ? "ondirectbuy" : "offdirectbuy";
         if ($marzbandirectpay == "offdirectbuy") {
@@ -3449,8 +3523,9 @@ $nameconfig";
                 "Service_time" => $prodcut['Service_time'],
                 "oldvolume" => $DataUserOut['data_limit'],
                 "oldtime" => $DataUserOut['expire'],
-                'code_product' => $prodcut['code_product'],
-                'id_order' => $randomString
+                'code_product' => rxRenewalNormalizeProductCode($prodcut['code_product']),
+                'id_order' => $randomString,
+                'reservation' => $rxReservationSelection
             ));
             $value = fx_value_with_snapshot($value, $fxRenewSnapshot);
             $type = "extend_user";
@@ -3510,12 +3585,16 @@ $nameconfig";
     } else {
         $Balance_Low_user = $user['Balance'];
     }
-    if ($nameloc['name_product'] == "سرویس تست") {
-        update("invoice", "name_product", $prodcut['name_product'], "id_invoice", $nameloc['id_invoice']);
-        update("invoice", "price_product", $prodcut['price_product'], "id_invoice", $nameloc['id_invoice']);
-    }
-    $extend = $ManagePanel->extend($marzban_list_get['Methodextend'], $prodcut['Volume_constraint'], $prodcut['Service_time'], $nameloc['username'], $prodcut['code_product'], $marzban_list_get['code_panel']);
-    if ($extend['status'] == false) {
+    $rxExtendOptions = [
+        'source' => 'wallet',
+        'ref' => 'wallet:' . $randomString,
+        'id_user' => $from_id,
+        'price' => $pricelastextend,
+        'reservation' => is_array($rxReservationSelection) ? array_merge($rxReservationSelection, ['payment_ref' => 'wallet:' . $from_id . ':' . $randomString]) : null,
+    ];
+    $extend = $ManagePanel->extend($marzban_list_get['Methodextend'], $prodcut['Volume_constraint'], $prodcut['Service_time'], $nameloc['username'], $prodcut['code_product'], $marzban_list_get['code_panel'], null, $rxExtendOptions);
+    $rxExtendPending = rxRenewalIsPending($extend);
+    if ($extend['status'] == false && !$rxExtendPending) {
         if ($__chargedExUser && function_exists('balance_atomic_credit')) {
             $__refundedEx = balance_atomic_credit($from_id, $pricelastextend);
             if ($__refundedEx && function_exists('wallet_ledger_record')) {
@@ -3528,13 +3607,14 @@ $nameconfig";
         $textreports = "خطای تمدید سرویس
 <blockquote>نام پنل : {$marzban_list_get['name_panel']}</blockquote>
 <blockquote>نام کاربری سرویس : {$nameloc['username']}</blockquote>
+<blockquote>کد خطا : " . htmlspecialchars((string) ($extend['code'] ?? ''), ENT_QUOTES, 'UTF-8') . "</blockquote>
 <blockquote>دلیل خطا : {$extend['msg']}</blockquote>";
         if ($rxStockEmpty) {
             sendmessage($from_id, $datatextbot['dyn_errors_renewal_stock_empty'] ?? "❌ موجودی انبار برای این محصول تمام شده است. مبلغی از حساب شما کسر نشد.", null, 'HTML');
         } elseif ($rxQueuedExists) {
             sendmessage($from_id, $datatextbot['dyn_errors_queued_renewal_exists'] ?? "❌ یک رزرو اشتراک برای این سرویس در انتظار فعال‌سازی است. مبلغی از حساب شما کسر نشد.", null, 'HTML');
         } else {
-            sendmessage($from_id, $datatextbot['dyn_errors_renewal_support_error'] ?? "❌خطایی در تمدید سرویس رخ داده با پشتیبانی در ارتباط باشید", null, 'HTML');
+            sendmessage($from_id, rxRenewalFailureText($extend, $datatextbot['dyn_errors_renewal_support_error'] ?? "❌خطایی در تمدید سرویس رخ داده با پشتیبانی در ارتباط باشید"), null, 'HTML');
         }
         if (strlen($setting['Channel_Report'] ?? '') > 0) {
             telegram('sendmessage', [
@@ -3557,8 +3637,9 @@ $nameconfig";
         "Service_time" => $prodcut['Service_time'],
         "oldvolume" => $DataUserOut['data_limit'],
         "oldtime" => $DataUserOut['expire'],
-        'code_product' => $prodcut['code_product'],
-        'id_order' => $randomString
+        'code_product' => rxRenewalNormalizeProductCode($prodcut['code_product']),
+        'id_order' => $randomString,
+        'reservation' => $rxReservationSelection
     ));
     $value = fx_value_with_snapshot($value, $fxRenewSnapshot);
     $type = "extend_user";
@@ -3567,7 +3648,15 @@ $nameconfig";
     $stmt->bind_param("ssssssss", $from_id, $nameloc['username'], $value, $type, $dateacc, $prodcut['price_product'],$extend_json, $status);
     $stmt->execute();
     $stmt->close();
-    update("invoice", "Status", "active", "id_invoice", $id_invoice);
+    if (!$rxExtendPending && empty($extend['queued'])) {
+        if ($nameloc['name_product'] == "سرویس تست") {
+            update("invoice", "name_product", $prodcut['name_product'], "id_invoice", $nameloc['id_invoice']);
+            update("invoice", "price_product", $prodcut['price_product'], "id_invoice", $nameloc['id_invoice']);
+        }
+        if (($nameloc['Status'] ?? '') !== 'disablebyadmin') {
+            update("invoice", "Status", "active", "id_invoice", $id_invoice);
+        }
+    }
     MiniDiscount::logSale([
         'id_user' => $from_id,
         'id_invoice' => $id_invoice,
@@ -3605,6 +3694,9 @@ $nameconfig";
 ▫️نام محصول : {$prodcut['name_product']}
 ▫️مبلغ تمدید $priceproductformat تومان
 ";
+        if (is_array($extend['reservation'] ?? null)) {
+            $textextend .= "\n" . rxRenewalText('reservation_trigger', ['label' => (string) $extend['reservation']['trigger_label']]) . "\n" . rxRenewalText('reservation_policy', ['label' => (string) $extend['reservation']['policy_label']]);
+        }
     } else {
         $textextend = "✅ تمدید برای سرویس شما با موفقیت صورت گرفت
 

@@ -514,6 +514,7 @@ final class ServiceHandler extends BaseHandler
             'ip_summary'               => $ipSummary,
             'hwid_info'                => $hwidInfo,
             'has_queued_renewal'       => $this->hasQueuedRenewal($invoice['username']),
+            'queued_renewal'           => $this->queuedRenewalSummary($invoice),
             'client_type'              => $effectiveClientType,
             'requested_client_type'    => $clientType,
             'client_documents'         => (($panel['config'] ?? '') === 'onconfig' && panel_feature_enabled($panel, 'configbtn')) ? $clientDocuments : [],
@@ -524,10 +525,20 @@ final class ServiceHandler extends BaseHandler
     private function hasQueuedRenewal(string $username): bool
     {
         $row = FaoximaDb::fetchOne(
-            "SELECT id FROM queued_renewal WHERE username = :username AND status = 'pending' LIMIT 1",
+            "SELECT id FROM queued_renewal WHERE username = :username AND status IN (" . rx_rn_unresolved_sql() . ") LIMIT 1",
             [':username' => $username]
         );
         return $row !== null;
+    }
+
+
+    private function queuedRenewalSummary(array $invoice): ?array
+    {
+        try {
+            return rxReservationSummaryForService((string)($invoice['username'] ?? ''), (string)($invoice['Service_location'] ?? ''), (string)($invoice['id_invoice'] ?? ''));
+        } catch (Throwable $e) {
+            return null;
+        }
     }
 
 
@@ -702,6 +713,7 @@ final class ServiceHandler extends BaseHandler
             'disabled_actions'         => array_values(array_unique($disabled)),
             'note'                     => (string)($invoice['note'] ?? ''),
             'has_queued_renewal'       => $this->hasQueuedRenewal((string)$invoice['username']),
+            'queued_renewal'           => $this->queuedRenewalSummary($invoice),
         ];
     }
 

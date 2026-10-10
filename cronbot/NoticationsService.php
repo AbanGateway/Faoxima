@@ -154,7 +154,7 @@ class ServiceMonitor
     }
     private function hasPendingQueuedRenewal($username)
     {
-        $stmt = $this->pdo->prepare("SELECT id FROM queued_renewal WHERE username = :username AND status = 'pending' LIMIT 1");
+        $stmt = $this->pdo->prepare("SELECT id FROM queued_renewal WHERE username = :username AND status IN ('pending', 'processing', 'retry', 'reconciling') LIMIT 1");
         $stmt->execute([':username' => $username]);
         return $stmt->fetch(PDO::FETCH_ASSOC) !== false;
     }

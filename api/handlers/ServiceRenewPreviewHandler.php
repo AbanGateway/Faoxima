@@ -51,19 +51,76 @@ final class ServiceRenewPreviewHandler extends BaseHandler
             $days = $product['Service_time'];
         }
 
-        $preview = rxRenewalPreviewForService(new ManagePanel(), $panel, (string)$invoice['username'], $volume, $days);
+        $managePanel = new ManagePanel();
+        $reservationUi = rxReservationUiEnabled($panel);
+        $snapshot = rx_pf_panel_snapshot($managePanel, (string)$panel['name_panel'], (string)$invoice['username'], (string)($panel['type'] ?? ''));
+        $usableSnapshot = !empty($snapshot['ok']) && !empty($snapshot['exists']) ? $snapshot : null;
+        $selection = null;
+        if ($reservationUi) {
+            $input = FaoximaInput::array($this->data, 'reservation');
+            $selection = rxReservationSelectionFromData(['rsv' => !empty($input) ? $input : rxReservationDefaultSelection($usableSnapshot)]);
+            if (($selection['trigger'] ?? '') === 'date') {
+                $selection['trigger_at'] = rxReservationParseDate((string)($input['trigger_at'] ?? ''), time());
+            }
+        }
+
+        $preview = rxRenewalPreviewForService($managePanel, $panel, (string)$invoice['username'], $volume, $days, [
+            'reservation' => $selection,
+            'snapshot' => $snapshot,
+            'id_invoice' => (string)$invoice['id_invoice'],
+        ]);
         $plan = is_array($preview['plan'] ?? null) ? $preview['plan'] : null;
 
+        $reservation = null;
+        if ($reservationUi) {
+            $availability = rxReservationTriggerAvailability($usableSnapshot);
+            $triggers = [];
+            foreach (rxReservationTriggers() as $trigger) {
+                $triggers[] = [
+                    'key' => $trigger,
+                    'label' => rxRenewalText('trigger_' . $trigger),
+                    'available' => !empty($availability[$trigger]['available']),
+                    'reason' => (string)($availability[$trigger]['reason'] ?? ''),
+                ];
+            }
+            $policies = [];
+            foreach (array_keys(rxRenewalPolicies()) as $policy) {
+                $policies[] = [
+                    'key' => $policy,
+                    'label' => rxRenewalPolicyLabel($policy),
+                    'short' => rxRenewalPolicyLabel($policy, false, true),
+                    'usage_reset_option' => rxRenewalPolicyAllowsUsageReset($policy),
+                ];
+            }
+            $check = rxReservationNormalizeSelection($selection, $usableSnapshot, time());
+            $reservation = [
+                'selection' => $selection,
+                'triggers' => $triggers,
+                'policies' => $policies,
+                'valid' => !empty($check['ok']),
+                'error' => empty($check['ok']) ? rxRenewalReasonText((string)$check['reason'], $check) : '',
+                'usage_note' => rxRenewalText('preview_usage_note'),
+            ];
+        }
+
         FaoximaResponse::ok([
-            'available' => $plan !== null && !empty($plan['ok']),
-            'blocked'   => !empty($preview['blocked']),
-            'text'      => (string)($preview['text'] ?? ''),
-            'plan'      => $plan === null || empty($plan['ok']) ? null : [
+            'available'   => !empty($preview['ok']) && ($plan !== null || ($preview['mode'] ?? '') !== 'immediate'),
+            'blocked'     => !empty($preview['blocked']) || ($reservation !== null && empty($reservation['valid'])),
+            'mode'        => (string)($preview['mode'] ?? 'immediate'),
+            'reason'      => (string)($preview['reason'] ?? ''),
+            'text'        => (string)($preview['text'] ?? '') . ($reservation !== null && empty($reservation['valid']) ? "\n" . $reservation['error'] : ''),
+            'reservation' => $reservation,
+            'plan'        => $plan === null || empty($plan['ok']) ? null : [
                 'queued'             => !empty($plan['queued']),
+                'policy'             => (string)($plan['policy'] ?? ''),
+                'traffic_mode'       => (string)($plan['traffic_mode'] ?? ''),
+                'time_mode'          => (string)($plan['time_mode'] ?? ''),
                 'reset_usage'        => !empty($plan['reset_usage']),
                 'method'             => (string)($plan['label'] ?? ''),
                 'current_expire'     => (int)($plan['before_expire'] ?? 0),
                 'new_expire'         => isset($plan['expire']) ? (int)$plan['expire'] : null,
+                'pending'            => !empty($plan['target_pending']),
+                'pending_duration'   => $plan['target_pending_duration'] ?? null,
                 'current_data_limit' => (int)($plan['before_data_limit'] ?? 0),
                 'used_traffic'       => (int)($plan['before_used_traffic'] ?? 0),
                 'current_remaining'  => $plan['before_remaining'] ?? null,
@@ -71,6 +128,7 @@ final class ServiceRenewPreviewHandler extends BaseHandler
                 'purchased_volume'   => (int)($plan['purchased_volume_bytes'] ?? 0),
                 'new_data_limit'     => isset($plan['data_limit']) ? (int)$plan['data_limit'] : null,
                 'new_remaining'      => $plan['target_remaining'] ?? null,
+                'reactivates'        => !empty($plan['enable']),
             ],
         ]);
     }
