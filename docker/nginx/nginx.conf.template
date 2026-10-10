@@ -3,7 +3,7 @@ map $request_id $faoxima_request_id {
 }
 
 map $status $faoxima_loggable {
-    ~^[0-4] 0;
+    ~^[23] 0;
     default 1;
 }
 

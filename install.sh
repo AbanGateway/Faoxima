@@ -761,6 +761,87 @@ mysql_binlog_query() {
     fi
 }
 
+cleanup_mysql_logs_now() {
+    local cid volume image override output confirm new_cid new_volume
+    if [ ! -f "$ENV_FILE" ] || [ ! -f "$COMPOSE_FILE" ]; then
+        ui_err "No installed database configuration was found."
+        return 1
+    fi
+    cid=$(dc ps -a -q db 2>/dev/null)
+    if [ -z "$cid" ]; then
+        ui_err "The database container was not found; cleanup stopped."
+        return 1
+    fi
+    volume=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/mysql"}}{{if eq .Type "volume"}}{{.Name}}{{end}}{{end}}{{end}}' "$cid" 2>/dev/null)
+    image=$(docker inspect --format '{{.Image}}' "$cid" 2>/dev/null)
+    if [[ ! "$volume" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]+$ ]] || [[ ! "$image" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+        ui_err "The existing database volume or image could not be verified; cleanup stopped."
+        return 1
+    fi
+    ui_warn "This clears MySQL Docker logs and all inactive binary logs, including recent ones."
+    ui_warn "The shared database container will be recreated; all bots will briefly lose database access."
+    ui_info "The existing image and database volume (${volume}) will be reused. Database tables are preserved."
+    ui_warn "Binary log recovery history will be lost. Do not continue if an offline replica or backup needs these logs."
+    printf '  %s❯%s Clean MySQL binary and Docker logs now? [y/N]: ' "$C_YELLOW" "$C_RESET"
+    read -r confirm
+    if [[ "${confirm,,}" != "y" ]]; then
+        ui_info "Cancelled."
+        return 0
+    fi
+    override=$(mktemp "${TMPDIR:-/tmp}/faoxima_log_cleanup.XXXXXX.yml") || { ui_err "Cannot prepare the database log cleanup configuration."; return 1; }
+    if ! cat > "$override" <<EOF
+services:
+  db:
+    image: ${image}
+    stop_grace_period: 120s
+    volumes:
+      - db_data:/var/lib/mysql
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+volumes:
+  db_data:
+    external: true
+    name: ${volume}
+EOF
+    then
+        rm -f "$override"
+        ui_err "Cannot write the database log cleanup configuration."
+        return 1
+    fi
+    if ! output=$(dc -f "$override" config --quiet 2>&1); then
+        rm -f "$override"
+        ui_err "Database cleanup configuration is invalid: ${output}"
+        return 1
+    fi
+    ui_action "Clearing old MySQL Docker logs and enabling log rotation (3 files of 20 MiB)..."
+    if ! dc -f "$override" up -d --no-deps --no-build --pull never --force-recreate --timeout 120 db; then
+        rm -f "$override"
+        ui_err "Database container recreation failed. Check its status and logs before retrying."
+        return 1
+    fi
+    rm -f "$override"
+    new_cid=$(dc ps -a -q db 2>/dev/null)
+    new_volume=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/mysql"}}{{if eq .Type "volume"}}{{.Name}}{{end}}{{end}}{{end}}' "$new_cid" 2>/dev/null)
+    if [ "$new_volume" != "$volume" ]; then
+        ui_err "The database volume could not be verified after recreation. Cleanup stopped."
+        return 1
+    fi
+    ui_action "Waiting for MySQL to become healthy..."
+    if ! wait_for_healthy db 180; then
+        ui_err "MySQL Docker logs were cleared, but the database did not become healthy."
+        dc logs --tail=50 db
+        return 1
+    fi
+    ui_ok "Old MySQL Docker logs cleared; log rotation is enabled."
+    if ! cleanup_mysql_binlogs_now confirmed; then
+        ui_warn "Docker log cleanup succeeded, but binary log cleanup did not complete."
+        return 1
+    fi
+}
+
 cleanup_mysql_binlogs_now() {
     local logs active_log before_bytes after_bytes output confirm pass
     if [ ! -f "$ENV_FILE" ] || [ ! -f "$COMPOSE_FILE" ]; then
@@ -778,11 +859,13 @@ cleanup_mysql_binlogs_now() {
     ui_info "This affects the shared MySQL server used by all installed bots. Database tables are preserved."
     ui_warn "All inactive binary logs will be removed, including recent ones. Their recovery history will be lost."
     ui_warn "Do not continue if an offline replica or a backup still needs these logs."
-    printf '  %s❯%s Clean binary logs now? [y/N]: ' "$C_YELLOW" "$C_RESET"
-    read -r confirm
-    if [[ "${confirm,,}" != "y" ]]; then
-        ui_info "Cancelled."
-        return 0
+    if [ "${1:-}" != "confirmed" ]; then
+        printf '  %s❯%s Clean binary logs now? [y/N]: ' "$C_YELLOW" "$C_RESET"
+        read -r confirm
+        if [[ "${confirm,,}" != "y" ]]; then
+            ui_info "Cancelled."
+            return 0
+        fi
     fi
     for pass in 1 2; do
         active_log=$(printf '%s\n' "$logs" | awk 'NF {name=$1} END {print name}')
@@ -2131,6 +2214,11 @@ EOF
 services:
   app_${botname}:
     image: faoxima_app:latest
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
     env_file: ${bot_dir}/.env
     volumes:
       - ${bot_dir}:/var/www/faoxima
@@ -3700,7 +3788,11 @@ write_fpm_pool_conf() {
     [ "$max_spare" -gt "$max_children" ] && max_spare="$max_children"
 
     cat > "$file" <<EOF
+[global]
+log_level = warning
+
 [www]
+access.log = /dev/null
 pm.max_children = ${max_children}
 pm.start_servers = ${start_servers}
 pm.min_spare_servers = ${min_spare}
@@ -4496,11 +4588,20 @@ change_domain() {
     fi
 }
 
+filter_runtime_log_noise() {
+    awk '
+        /"[A-Z]+ [^"]*" [23][0-9][0-9]([[:space:]]|$)/ { next }
+        /"request_time"[[:space:]]*:/ && /"status"[[:space:]]*:[[:space:]]*[23][0-9][0-9]([,}[:space:]]|$)/ { next }
+        /NOTICE: (fpm is running, pid [0-9]+|ready to handle connections)[[:space:]]*$/ { next }
+        { print }
+    '
+}
+
 container_has_error_logs() {
     local service="$1"
     dc logs --tail=200 "$service" 2>&1 \
         | grep -viE '"ok":(true|false)' \
-        | grep -vE '"[A-Z]+ [^"]*" [0-9]{3}$' \
+        | filter_runtime_log_noise \
         | grep -qiE 'error|exception|fatal|failed|warn|emerg|crit|panic'
 }
 
@@ -4628,16 +4729,24 @@ view_error_logs() {
         fi
 
         local sel=$((choice - 1))
-        local sel_kind="${KINDS[$sel]}" sel_path="${PATHS[$sel]}"
+        local sel_kind="${KINDS[$sel]}" sel_path="${PATHS[$sel]}" log_output
         ui_rule
         if [ "$sel_kind" = "container" ]; then
             printf '  %s● %s (last 200 lines)%s\n' "$C_CYAN" "$sel_path" "$C_RESET"
             ui_rule
-            dc logs --tail=200 "$sel_path" 2>/dev/null || ui_err "Could not read ${sel_path} logs."
+            if log_output=$(dc logs --tail=200 "$sel_path" 2>/dev/null); then
+                printf '%s\n' "$log_output" | filter_runtime_log_noise
+            else
+                ui_err "Could not read ${sel_path} logs."
+            fi
         else
             printf '  %s● %s%s  %s(last 200 lines)%s\n' "$C_CYAN" "$sel_path" "$C_RESET" "$C_DIM" "$C_RESET"
             ui_rule
-            tail -n 200 "$sel_path" 2>/dev/null || ui_err "Could not read ${sel_path}."
+            if log_output=$(tail -n 200 "$sel_path" 2>/dev/null); then
+                printf '%s\n' "$log_output" | filter_runtime_log_noise
+            else
+                ui_err "Could not read ${sel_path}."
+            fi
         fi
 
         printf '\n  %s❯%s 🗑️  Hide this entry from the current view? (y/N): ' "$C_YELLOW" "$C_RESET"
@@ -5931,7 +6040,7 @@ menu_database() {
         "${C_WHITE}[3]${C_RESET} Import Database" \
         "${C_WHITE}[4]${C_RESET} Optimize Database & Server" \
         "${C_WHITE}[5]${C_RESET} Install / Enable Redis" \
-        "${C_WHITE}[6]${C_RESET} Clean MySQL Binary Logs Now" \
+        "${C_WHITE}[6]${C_RESET} Clean MySQL Binary & Docker Logs Now" \
         "${C_RED}[7]${C_RESET} Back to main menu"
 
     local option
@@ -5944,7 +6053,7 @@ menu_database() {
         3) import_database ;;
         4) optimize_database ;;
         5) install_redis ;;
-        6) cleanup_mysql_binlogs_now ;;
+        6) cleanup_mysql_logs_now ;;
         7) return 0 ;;
         *)
             ui_err "Invalid option. Please try again."

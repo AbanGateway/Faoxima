@@ -1,7 +1,14 @@
 name: ${COMPOSE_PROJECT_NAME:-faoxima}
 
+x-runtime-logging: &runtime-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
 services:
   nginx:
+    logging: *runtime-logging
     image: nginx:1.27-alpine
     depends_on:
       - app
@@ -17,6 +24,7 @@ services:
     restart: unless-stopped
 
   app:
+    logging: *runtime-logging
     image: faoxima_app:latest
     build:
       context: .
@@ -43,6 +51,8 @@ services:
     restart: unless-stopped
 
   db:
+    logging: *runtime-logging
+    stop_grace_period: 120s
     image: mysql:8.0
     command:
       - --default-authentication-plugin=mysql_native_password
@@ -63,6 +73,7 @@ services:
     restart: unless-stopped
 
   redis:
+    logging: *runtime-logging
     image: redis:7-alpine
     command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
     volumes:
@@ -70,6 +81,7 @@ services:
     restart: unless-stopped
 
   certbot:
+    logging: *runtime-logging
     image: certbot/certbot
     volumes:
       - certs:/etc/letsencrypt
@@ -79,6 +91,7 @@ services:
     restart: unless-stopped
 
   phpmyadmin:
+    logging: *runtime-logging
     image: phpmyadmin:5
     profiles: ["phpmyadmin"]
     environment:
