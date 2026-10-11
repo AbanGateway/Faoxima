@@ -135,6 +135,7 @@ if (!function_exists('rx_featCategoryRows')) {
                 [['text' => "⚙️ مدیریت", 'callback_data' => "cronjobs_settings"],
                  ['text' => "⏱ نمایش لیست", 'callback_data' => "cronjobs_settings"],
                  ['text' => "زمان‌بندی", 'callback_data' => "none"]],
+                [['text' => "🧪 تست کرون", 'callback_data' => "cronhealth_start"]],
             ];
         }
         return [];
@@ -3923,6 +3924,16 @@ $caption";
         [['text' => "🔙 بازگشت به وضعیت قابلیت‌ها", 'callback_data' => 'featcat_main']],
     ]]);
     nm_adminInstantReply($from_id, $rxOptResultText, $rxOptKb, 'HTML');
+    return;
+} elseif (is_string($datain ?? null)
+    && ($datain === 'cronhealth_start' || strpos($datain, 'cronhealth_chk_') === 0)
+    && $adminrulecheck['rule'] === 'administrator') {
+    if (!function_exists('rx_cron_health_admin_action') && is_file(REFACTORED_LEGACY_ROOT . '/lib/CronHealth.php')) {
+        require_once REFACTORED_LEGACY_ROOT . '/lib/CronHealth.php';
+    }
+    if (function_exists('rx_cron_health_admin_action')) {
+        rx_cron_health_admin_action($pdo ?? null, (string) $datain, $from_id, $callback_query_id ?? null, $message_id ?? 0);
+    }
     return;
 } elseif ($datain === 'glass_mode_settings' && $adminrulecheck['rule'] === 'administrator') {
 

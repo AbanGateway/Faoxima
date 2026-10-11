@@ -14,15 +14,33 @@ if (function_exists('putenv') && !preg_match('/(^|,)\s*putenv\s*(,|$)/', strtolo
 }
 
 
+$rxCronHealthLib = dirname(__DIR__) . '/lib/CronHealth.php';
+if (is_file($rxCronHealthLib)) {
+    try {
+        require_once $rxCronHealthLib;
+    } catch (Throwable $e) {
+    }
+}
+if (function_exists('rx_cron_health_orch_begin')) {
+    rx_cron_health_orch_begin();
+}
+$rxHealthStage = static function (string $name, string $state): void {
+    if (function_exists('rx_cron_health_orch_stage')) {
+        rx_cron_health_orch_stage($name, $state);
+    }
+};
+
 $lockFile = __DIR__ . '/cron.lock';
 $lockHandle = @fopen($lockFile, 'c');
 if ($lockHandle === false || !@flock($lockHandle, LOCK_EX | LOCK_NB)) {
+    $rxHealthStage('lock', $lockHandle === false ? 'open_failed' : 'busy');
     if (is_resource($lockHandle)) {
         @fclose($lockHandle);
     }
     echo "BUSY\n";
     exit;
 }
+$rxHealthStage('lock', 'acquired');
 @ftruncate($lockHandle, 0);
 @fwrite($lockHandle, getmypid() . '|' . date('Y-m-d H:i:s'));
 @fflush($lockHandle);
@@ -55,10 +73,12 @@ if (is_readable($functionBootstrap)) {
     try {
         require_once $functionBootstrap;
         $bootstrapLoaded = true;
+        $rxHealthStage('bootstrap', 'ok');
         if (is_file($rxCronBootstrapMarker)) {
             @unlink($rxCronBootstrapMarker);
         }
     } catch (Throwable $e) {
+        $rxHealthStage('bootstrap', 'failed');
         $rxLogIt = true;
         if (is_file($rxCronBootstrapMarker) && (time() - (int) @filemtime($rxCronBootstrapMarker)) < 3600) {
             $rxLogIt = false;
@@ -73,6 +93,7 @@ if (is_readable($functionBootstrap)) {
 }
 
 if (!$bootstrapLoaded) {
+    $rxHealthStage('bootstrap', 'missing');
     echo "SKIP (bootstrap unavailable)\n";
     exit;
 }
@@ -144,9 +165,11 @@ if (!defined('APP_ROOT_PATH')) {
 
 $pdo = function_exists('getDatabaseConnection') ? getDatabaseConnection() : null;
 if (!($pdo instanceof PDO)) {
+    $rxHealthStage('db', 'failed');
     echo "SKIP (db unavailable)\n";
     exit;
 }
+$rxHealthStage('db', 'ok');
 
 $runtimeState = [];
 if (function_exists('loadCronRuntimeState')) {
@@ -156,6 +179,10 @@ if (function_exists('loadCronRuntimeState')) {
         $runtimeState = [];
     }
 }
+
+$rxHealthTrace = function_exists('rx_cron_health_orch_attach_db')
+    ? rx_cron_health_orch_attach_db($pdo)
+    : ['traced' => false, 'claimed' => [], 'active' => false];
 
 
 $rxCronbotDir = __DIR__ . DIRECTORY_SEPARATOR . '..' . DIRECTORY_SEPARATOR . 'cronbot';
@@ -734,6 +761,19 @@ if (!$rxIsCli && !empty($dueTasks)) {
 
     foreach (array_keys($successfulJobs) as $jobKey) {
         $rxMarkJobRun($pdo, $jobKey, $now, $runtimeState);
+    }
+}
+
+if (!empty($rxHealthTrace['traced']) && function_exists('rx_cron_health_orch_diagnostics')) {
+    rx_cron_health_orch_diagnostics($pdo);
+}
+if (function_exists('rx_cron_health_orch_complete')) {
+    try {
+        if (!empty($rxHealthTrace['active']) && !function_exists('telegram') && is_readable(APP_ROOT_PATH . '/botapi.php')) {
+            require_once APP_ROOT_PATH . '/botapi.php';
+        }
+        rx_cron_health_orch_complete($pdo, !empty($rxHealthTrace['active']));
+    } catch (Throwable $e) {
     }
 }
 

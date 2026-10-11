@@ -1,6 +1,9 @@
 <?php
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/lib/WebhookAuth.php';
+if (is_file(__DIR__ . '/lib/CronHealth.php')) {
+    require_once __DIR__ . '/lib/CronHealth.php';
+}
 
 if (!function_exists('rx_releaseWebhookConnection')) {
     function rx_releaseWebhookConnection()
@@ -3000,6 +3003,9 @@ if (!is_numeric($from_id) || (string)(int) $from_id !== (string) $from_id) {
 }
 $from_id = (int) $from_id;
 rx_releaseWebhookConnection();
+if (function_exists('rx_cron_health_webhook_tick')) {
+    register_shutdown_function('rx_cron_health_webhook_tick');
+}
 $text =convertPersianNumbersToEnglish($text);
 
 $text_inline = $update["callback_query"]["message"]['text'] ?? '';
