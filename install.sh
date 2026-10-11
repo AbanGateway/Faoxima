@@ -1506,12 +1506,12 @@ grant_file_permissions() {
     fi
 
     local php_owner
-    php_owner=$(resolve_php_fpm_owner "$service")
+    php_owner=$(resolve_php_fpm_owner "$service") || return 1
 
     ui_action "Re-applying file permissions inside the ${service} container..."
     log_action "Normalizing runtime permissions inside ${service} (owner ${php_owner})"
     local output
-    if output=$(dc exec -T "$service" sh -c "$(permission_normalize_script)" _ "$CONTAINER_APP_DIR" "$php_owner" 2>&1); then
+    if output=$(dc exec -T -u 0 "$service" sh -c "$(permission_normalize_script)" _ "$CONTAINER_APP_DIR" "$php_owner" 2>&1); then
         ui_ok "File permissions re-applied."
     else
         ui_err "Failed to re-apply file permissions inside the ${service} container."
@@ -1528,10 +1528,10 @@ permission_normalize_script() {
 set -e
 app_dir="$1"
 owner="$2"
-mkdir -p "$app_dir/cron" "$app_dir/cronbot/.runtime" "$app_dir/logs" 2>/dev/null || true
-chown -R "$owner" "$app_dir" 2>/dev/null || true
-find "$app_dir" -path "$app_dir/installer" -prune -o -type d -exec chmod 775 {} + 2>/dev/null || true
-find "$app_dir" -path "$app_dir/installer" -prune -o -type f -exec chmod 664 {} + 2>/dev/null || true
+mkdir -p "$app_dir/cron" "$app_dir/cronbot/.runtime" "$app_dir/logs"
+chown -R "$owner" "$app_dir"
+find "$app_dir" -path "$app_dir/installer" -prune -o -type d -exec chmod 775 {} +
+find "$app_dir" -path "$app_dir/installer" -prune -o -type f -exec chmod 664 {} +
 if [ -d "$app_dir/installer" ]; then
     chmod 555 "$app_dir/installer"
     find "$app_dir/installer" -type f -exec chmod 444 {} +
@@ -1588,15 +1588,19 @@ normalize_source_permissions() {
 
 resolve_php_fpm_owner() {
     local service="${1:-app}" resolved
-    resolved=$(dc exec -T "$service" sh -c '
+    resolved=$(dc exec -T -u 0 "$service" sh -c '
         u=$(grep -hE "^[[:space:]]*user[[:space:]]*=" /usr/local/etc/php-fpm.d/*.conf 2>/dev/null | tail -n1 | sed -E "s/^[^=]*=[[:space:]]*//; s/[[:space:]]*(;.*)?$//")
         g=$(grep -hE "^[[:space:]]*group[[:space:]]*=" /usr/local/etc/php-fpm.d/*.conf 2>/dev/null | tail -n1 | sed -E "s/^[^=]*=[[:space:]]*//; s/[[:space:]]*(;.*)?$//")
         [ -n "$u" ] || u=www-data
         [ -n "$g" ] || g=$u
-        id -u "$u" >/dev/null 2>&1 || u=www-data
+        id -u "$u" >/dev/null 2>&1 || exit 1
+        getent group "$g" >/dev/null 2>&1 || exit 1
         printf "%s:%s" "$u" "$g"
-    ' 2>/dev/null | tr -d '\r')
-    [[ "$resolved" =~ ^[A-Za-z0-9._-]+:[A-Za-z0-9._-]+$ ]] || resolved="www-data:www-data"
+    ' 2>/dev/null | tr -d '\r') || {
+        ui_err "Unable to resolve the PHP-FPM runtime owner in ${service}." >&2
+        return 1
+    }
+    [[ "$resolved" =~ ^[A-Za-z0-9._-]+:[A-Za-z0-9._-]+$ ]] || return 1
     printf '%s' "$resolved"
 }
 
@@ -1609,18 +1613,18 @@ verify_runtime_permissions() {
     fi
 
     local php_owner php_user
-    php_owner=$(resolve_php_fpm_owner "$service")
+    php_owner=$(resolve_php_fpm_owner "$service") || return 1
     php_user="${php_owner%%:*}"
     log_info "Runtime permission check: PHP-FPM user in ${service} resolved to ${php_owner}"
 
     local output
-    output=$(dc exec -T -u "$php_user" "$service" sh -c '
+    output=$(dc exec -T -u "$php_owner" "$service" sh -c '
         cd "$1" || { echo "FAIL . cannot-enter"; exit 0; }
         check() {
-            f="$1/.permission-test.$$"
+            f=""
             if [ ! -d "$1" ]; then
                 echo "FAIL $1 missing"
-            elif ( : > "$f" ) 2>/dev/null && rm -f "$f" 2>/dev/null && [ ! -e "$f" ]; then
+            elif f=$(mktemp "$1/.permission-test.XXXXXX") && printf "%s" permission-ok > "$f" && [ "$(cat "$f")" = permission-ok ] && rm -f "$f" && [ ! -e "$f" ]; then
                 echo "OK $1"
             else
                 rm -f "$f" 2>/dev/null
@@ -1631,7 +1635,14 @@ verify_runtime_permissions() {
         for m in re/rx/*/manifest.php; do [ -f "$m" ] && check "${m%/manifest.php}"; done
         [ -d storage/private ] && check storage/private
         check .
-    ' _ "$CONTAINER_APP_DIR" 2>&1 | tr -d '\r')
+        for f in config.php function.php cron/cron.php; do
+            if [ -r "$f" ]; then echo "OK $f"; else echo "FAIL $f not-readable"; fi
+        done
+    ' _ "$CONTAINER_APP_DIR" 2>&1 | tr -d '\r') || {
+        ui_err "Runtime permission check could not execute in ${service}."
+        printf '%s\n' "$output"
+        return 1
+    }
 
     local line state rel failed=0 others_ok=0
     while IFS= read -r line; do
@@ -1647,17 +1658,18 @@ verify_runtime_permissions() {
                 ;;
             FAIL)
                 failed=1
-                ui_err "Runtime permission check failed: ${php_user} cannot write to ${CONTAINER_APP_DIR}/${rel} (${line##* })"
+                ui_err "Runtime permission check failed: ${CONTAINER_APP_DIR}/${rel} (${line##* }; user ${php_owner})"
                 log_error "Runtime permission check failed for ${rel} as ${php_user} (${line##* })"
                 ;;
         esac
     done <<< "$output"
 
-    if [ "$failed" -eq 0 ] && ! grep -q '^OK cronbot$' <<< "$output"; then
-        failed=1
-        ui_err "Runtime permission check could not run as ${php_user} inside ${service}."
-        log_error "Runtime permission check did not run as ${php_user} in ${service}: $(printf '%s' "$output" | head -n3 | tr '\n' ' ')"
-    fi
+    for rel in cron cronbot cronbot/.runtime logs . config.php function.php cron/cron.php; do
+        if ! grep -Fxq "OK $rel" <<< "$output"; then
+            failed=1
+            log_error "Runtime permission check missing success for ${rel} as ${php_owner} in ${service}"
+        fi
+    done
     [ "$failed" -eq 0 ] || return 1
 
     log_info "Runtime permission check: ${others_ok} additional runtime directories OK"
@@ -2939,23 +2951,23 @@ update_bot_source() {
         return 1
     fi
 
+    if [ -s "$temp_env" ]; then
+        cp "$temp_env" "$env_path" || { rm -rf "$work_dir" "$temp_config" "$temp_env"; ui_err ".env restore failed for '${label}'."; return 1; }
+    fi
+
     if ! normalize_source_permissions "$code_dir"; then
         rm -rf "$work_dir" "$temp_config" "$temp_env"
         ui_err "Runtime permission normalization failed for '${label}' after replacing the source."
         return 1
     fi
     if [ -n "$(dc ps -q "$app_service" 2>/dev/null)" ]; then
-        if ! verify_runtime_permissions "$app_service"; then
+        if ! grant_file_permissions "$app_service"; then
             rm -rf "$work_dir" "$temp_config" "$temp_env"
             ui_err "Update aborted for '${label}': PHP cannot write to its runtime directories."
             return 1
         fi
     else
         log_warn "Runtime permission check deferred for ${app_service}: container not running yet"
-    fi
-
-    if [ -s "$temp_env" ]; then
-        cp "$temp_env" "$env_path" || { rm -rf "$work_dir" "$temp_config" "$temp_env"; ui_err ".env restore failed for '${label}'."; return 1; }
     fi
 
     if [ ! -f "$config_path" ]; then
@@ -2994,7 +3006,7 @@ update_bot_source() {
 
     if [ "$should_build" = "1" ]; then
         ui_action "Rebuilding the app image for '${label}'..."
-        dc build "$app_service" || ui_warn "Rebuilding the app image for '${label}' failed — continuing with the existing image."
+        dc build "$app_service" || { ui_err "Rebuilding the app image for '${label}' failed. Update remains pending; retry after fixing the build error."; return 1; }
     fi
     ui_action "Restarting services for '${label}' with the updated source..."
     dc up -d --no-deps "$app_service" || { normalize_source_permissions "$code_dir" || true; ui_err "Failed to bring '${label}' services back up."; return 1; }
