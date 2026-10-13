@@ -64,12 +64,16 @@ final class ServiceRenewPreviewHandler extends BaseHandler
             'reservation' => $selection,
             'snapshot' => $snapshot,
             'id_invoice' => (string)$invoice['id_invoice'],
+            'stage' => 'api_preview',
         ]);
         $plan = is_array($preview['plan'] ?? null) ? $preview['plan'] : null;
 
         $reservation = null;
         if ($reservationUi) {
             $check = rxReservationNormalizeSelection($selection, $usableSnapshot, time());
+            if (empty($check['ok'])) {
+                rx_renewal_log('api_preview_selection', (string)$check['reason'], ['panel' => $panel, 'username' => (string)$invoice['username'], 'invoice_id' => (string)$invoice['id_invoice'], 'invoice_status' => $invoice['Status'] ?? null, 'method' => (string)($panel['Methodextend'] ?? ''), 'volume_gb' => $volume, 'days' => $days, 'snapshot' => $snapshot, 'detail' => $check['detail'] ?? null, 'mutation' => 'none']);
+            }
             $reservation = [
                 'valid' => !empty($check['ok']),
                 'error' => empty($check['ok']) ? rxRenewalReasonText((string)$check['reason'], $check) : '',

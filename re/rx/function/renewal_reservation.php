@@ -784,20 +784,37 @@ if (!function_exists('rxReservationPreview')) {
             'plan' => null,
         ];
         $ctx = rxRenewalContext($panel, $username);
+        $stage = (string) ($opts['stage'] ?? 'preview') . '_reservation';
+        $logCtx = [
+            'panel' => $panel,
+            'username' => $username,
+            'invoice_id' => (string) (($opts['id_invoice'] ?? '') !== '' ? $opts['id_invoice'] : ($ctx['invoice_id'] ?? '')),
+            'invoice_status' => $ctx['invoice_status'] ?? null,
+            'method' => (string) ($panel['Methodextend'] ?? ''),
+            'policy' => (string) ($selection['policy'] ?? ''),
+            'volume_gb' => $volumeGb,
+            'days' => $days,
+            'snapshot' => is_array($snapshot) ? $snapshot : [],
+            'mutation' => 'none',
+        ];
         if ($ctx['admin_blocked'] || (is_array($snapshot) && ($snapshot['status'] ?? '') === 'disabled')) {
+            rx_renewal_log($stage, 'admin_blocked', $logCtx + ['admin_blocked' => !empty($ctx['admin_blocked'])]);
             return array_merge($base, ['ok' => false, 'blocked' => true, 'reason' => 'admin_blocked', 'text' => rxRenewalReasonText('admin_blocked')]);
         }
         $serviceKey = rx_rn_service_key((string) ($opts['id_invoice'] ?? rxRenewalInvoiceId($username, (string) ($panel['name_panel'] ?? ''))), (string) ($panel['code_panel'] ?? ''), $username);
         if (rxReservationOutstanding($serviceKey, $username, (string) ($panel['name_panel'] ?? '')) !== null) {
+            rx_renewal_log($stage, 'queued_renewal_exists', $logCtx + ['detail' => 'service_key=' . $serviceKey]);
             return array_merge($base, ['ok' => false, 'blocked' => true, 'reason' => 'queued_renewal_exists', 'text' => rxRenewalReasonText('queued_renewal_exists')]);
         }
         $check = rxReservationNormalizeSelection($selection, $snapshot, $now);
         if (empty($check['ok'])) {
+            rx_renewal_log($stage, (string) $check['reason'], $logCtx + ['detail' => $check['detail'] ?? null]);
             return array_merge($base, ['ok' => false, 'blocked' => true, 'reason' => (string) $check['reason'], 'text' => rxRenewalReasonText((string) $check['reason'], $check)]);
         }
         $policy = (string) $check['policy'];
-        $plan = $snapshot !== null ? rxRenewalPlanForSnapshot($snapshot, $panel, $username, $policy, false, $volumeGb, $days, 'رزرو اشتراک', $now) : null;
+        $plan = $snapshot !== null ? rxRenewalPlanForSnapshot($snapshot, $panel, $username, $policy, false, $volumeGb, $days, 'رزرو اشتراک', $now, ['quiet' => true]) : null;
         if (is_array($plan) && in_array((string) ($plan['reason'] ?? ''), ['pending_unsupported', 'invalid_purchase'], true)) {
+            rx_renewal_log($stage, (string) $plan['reason'], ['policy' => $policy, 'plan' => $plan, 'admin_blocked' => !empty($ctx['admin_blocked'])] + $logCtx);
             return array_merge($base, ['ok' => false, 'blocked' => true, 'plan' => null, 'reason' => (string) $plan['reason'], 'text' => rxRenewalReasonText((string) $plan['reason'], $plan)]);
         }
         $lines = [
@@ -982,14 +999,19 @@ if (!function_exists('rxReservationFail')) {
             'next_attempt_at' => $permanent ? null : $now + (int) ($extra['delay'] ?? rxReservationBackoff($attempts)),
         ], array_intersect_key($extra, array_flip(['before_state', 'target_state', 'stage'])));
         rxReservationTransition((int) $row['id'], $token, $status, $fields);
-        rx_pf_log($permanent ? 'RESERVATION_FAILED' : 'RESERVATION_RETRY', $reason, [
-            'reservation_id' => (int) $row['id'],
-            'service_key' => (string) ($row['service_key'] ?? ''),
+        rx_renewal_log('reservation_' . ($permanent ? 'failed' : 'retry'), $reason, [
+            'panel_name' => (string) $row['name_panel'],
             'username' => (string) $row['username'],
-            'panel' => (string) $row['name_panel'],
+            'invoice_id' => (string) ($row['id_invoice'] ?? ''),
+            'method' => 'reservation',
             'policy' => (string) ($row['policy'] ?? ''),
-            'attempt' => $attempts,
-            'status' => $status,
+            'volume_gb' => $row['new_limit_gb'] ?? null,
+            'days' => $row['time_day'] ?? null,
+            'before' => rx_pf_decode($row['before_state'] ?? null),
+            'ref' => 'reservation:' . (int) $row['id'],
+            'operation_id' => $token,
+            'mutation' => ($extra['status'] ?? '') === 'reconciling' ? 'uncertain' : 'not_determined',
+            'detail' => 'attempt=' . $attempts . ' status=' . $status . ' service_key=' . (string) ($row['service_key'] ?? ''),
         ]);
         return ['outcome' => $status, 'reason' => $reason, 'row' => $row];
     }
@@ -1129,7 +1151,6 @@ if (!function_exists('rxReservationExecute')) {
                 'output' => json_encode(['status' => true, 'operation_id' => $token, 'after' => $after], JSON_UNESCAPED_UNICODE),
                 'active_key_clear' => true,
             ]);
-            rx_pf_log('RESERVATION_APPLIED', 'Reservation activated', ['reservation_id' => $id, 'service_key' => $serviceKey, 'username' => $username, 'panel' => (string) $panel['name_panel'], 'policy' => (string) ($row['policy'] ?? ''), 'target' => ['data_limit' => $plan['data_limit'] ?? null, 'expire' => $plan['expire'] ?? null], 'after' => $after]);
             return ['outcome' => 'applied', 'reason' => 'ok', 'row' => $row, 'before' => $res['rx_renewal']['before'] ?? null, 'after' => $after];
         }
         if (rxRenewalIsPending($res)) {
@@ -1214,7 +1235,20 @@ if (!function_exists('rxRenewalOpReconcileOne')) {
         $opId = (string) $op['op_id'];
         $attempts = (int) $op['attempt_count'] + 1;
         $target = rx_pf_decode($op['target_state'] ?? null);
-        $back = function (string $error) use ($opId, $attempts, $now, $op) {
+        $back = function (string $error) use ($opId, $attempts, $now, $op, $target) {
+            rx_renewal_log('reconcile', $error, [
+                'panel_name' => (string) ($op['name_panel'] ?? ''),
+                'username' => (string) ($op['username'] ?? ''),
+                'invoice_id' => (string) ($op['id_invoice'] ?? ''),
+                'method' => (string) ($op['method'] ?? ''),
+                'policy' => (string) ($op['policy'] ?? ''),
+                'plan' => is_array($target) ? $target : [],
+                'before' => rx_pf_decode($op['before_state'] ?? null),
+                'ref' => (string) ($op['ref'] ?? ''),
+                'operation_id' => $opId,
+                'mutation' => 'uncertain',
+                'detail' => 'attempt=' . $attempts . ($attempts >= RX_RN_MAX_ATTEMPTS ? ' manual_review' : ' retry'),
+            ]);
             if ($attempts >= RX_RN_MAX_ATTEMPTS) {
                 rx_rn_op_update($opId, ['state' => 'manual_review', 'last_error' => 'max_attempts_exceeded: ' . $error]);
                 rx_pf_alert_admin('renewal:' . $opId, 'تمدید نیازمند بررسی دستی است: ' . $error, ['username' => (string) $op['username']]);

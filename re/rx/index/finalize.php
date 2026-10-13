@@ -146,7 +146,7 @@ if (isset($update['pre_checkout_query'])) {
         ]
     ]);
     $prodcutVolumeLabel = intval($prodcut['Volume_constraint']) == 0 ? $textbotlang['users']['stateus']['Unlimited'] : $prodcut['Volume_constraint'];
-    $rxRenewPreview = rxRenewalPreviewForService($ManagePanel, select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select"), (string) $username, $prodcut['Volume_constraint'], $prodcut['Service_time']);
+    $rxRenewPreview = rxRenewalPreviewForService($ManagePanel, select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select"), (string) $username, $prodcut['Volume_constraint'], $prodcut['Service_time'], ['stage' => 'telegram_preview']);
     if (!empty($rxRenewPreview['blocked'])) {
         $keyboardextend = null;
     }
@@ -288,7 +288,7 @@ if (isset($update['pre_checkout_query'])) {
         sendmessage($from_id, $textbotlang['users']['extend']['renewalerror'], $keyboard, 'HTML');
         return;
     }
-    $rxFinalizePreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $usernamePanelExtends, $prodcut['Volume_constraint'], $prodcut['Service_time'], ['snapshot' => rx_pf_snapshot_from_datauser($DataUserOut, (string) ($marzban_list_get['type'] ?? '')), 'id_invoice' => is_array($nameloc) ? (string) $nameloc['id_invoice'] : '']);
+    $rxFinalizePreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $usernamePanelExtends, $prodcut['Volume_constraint'], $prodcut['Service_time'], ['snapshot' => rx_pf_snapshot_from_datauser($DataUserOut, (string) ($marzban_list_get['type'] ?? '')), 'id_invoice' => is_array($nameloc) ? (string) $nameloc['id_invoice'] : '', 'stage' => 'telegram_confirm']);
     if (!empty($rxFinalizePreview['blocked'])) {
         sendmessage($from_id, (string) $rxFinalizePreview['text'], $keyboard, 'HTML');
         return;

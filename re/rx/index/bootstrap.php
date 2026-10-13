@@ -3266,7 +3266,7 @@ $nameconfig";
     fx_quote_store($from_id, fx_quote_context_key('renew', (string) $nameloc['id_invoice'] . '|' . (string) $product['code_product']), fx_finalize_amount(fx_apply_user_discount($product['price_product'], $user['pricediscount']), $marzban_list_get, $fxRenewKinds), $marzban_list_get, $fxRenewKinds);
     $volumeextend = intval($product['Volume_constraint']) == 0 ? $textbotlang['users']['stateus']['Unlimited'] : $product['Volume_constraint'] . ' گیگ';
     $rxReservationUi = rxReservationUiEnabled($marzban_list_get);
-    $rxRenewPreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $nameloc['username'], $product['Volume_constraint'], $product['Service_time'], ['id_invoice' => (string) $nameloc['id_invoice']]);
+    $rxRenewPreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $nameloc['username'], $product['Volume_constraint'], $product['Service_time'], ['id_invoice' => (string) $nameloc['id_invoice'], 'stage' => 'telegram_preview']);
     if ($rxReservationUi && empty($rxRenewPreview['blocked'])) {
         $rxRenewPreview['text'] = '';
     }
@@ -3364,7 +3364,7 @@ $nameconfig";
         $info_product['price_product'] = $info_product['price_product'] - $result;
     }
     $info_product['price_product'] = round($info_product['price_product']);
-    $rxRenewPreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $nameloc['username'], $info_product['Volume_constraint'], $info_product['Service_time'], ['reservation' => rxReservationUiEnabled($marzban_list_get) ? rxReservationPanelSelection($marzban_list_get) : null, 'id_invoice' => (string) $nameloc['id_invoice']]);
+    $rxRenewPreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $nameloc['username'], $info_product['Volume_constraint'], $info_product['Service_time'], ['reservation' => rxReservationUiEnabled($marzban_list_get) ? rxReservationPanelSelection($marzban_list_get) : null, 'id_invoice' => (string) $nameloc['id_invoice'], 'stage' => 'telegram_preview']);
     if (rxReservationUiEnabled($marzban_list_get) && empty($rxRenewPreview['blocked'])) {
         $rxRenewPreview['text'] = '';
     }
@@ -3491,7 +3491,7 @@ $nameconfig";
     $DataUserOut = $ManagePanel->DataUser($nameloc['Service_location'], $nameloc['username']);
     $rxConfirmSnapshot = rx_pf_snapshot_from_datauser($DataUserOut, (string) ($marzban_list_get['type'] ?? ''));
     $rxReservationSelection = rxReservationUiEnabled($marzban_list_get) ? rxReservationPanelSelection($marzban_list_get) : null;
-    $rxConfirmPreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $nameloc['username'], $prodcut['Volume_constraint'], $prodcut['Service_time'], ['reservation' => $rxReservationSelection, 'snapshot' => $rxConfirmSnapshot, 'id_invoice' => (string) $nameloc['id_invoice']]);
+    $rxConfirmPreview = rxRenewalPreviewForService($ManagePanel, $marzban_list_get, (string) $nameloc['username'], $prodcut['Volume_constraint'], $prodcut['Service_time'], ['reservation' => $rxReservationSelection, 'snapshot' => $rxConfirmSnapshot, 'id_invoice' => (string) $nameloc['id_invoice'], 'stage' => 'telegram_confirm']);
     if (!empty($rxConfirmPreview['blocked'])) {
         sendmessage($from_id, (string) $rxConfirmPreview['text'], null, 'HTML');
         return;
@@ -3499,6 +3499,7 @@ $nameconfig";
     if (is_array($rxReservationSelection)) {
         $rxSelectionCheck = rxReservationNormalizeSelection($rxReservationSelection, !empty($rxConfirmSnapshot['ok']) && !empty($rxConfirmSnapshot['exists']) ? $rxConfirmSnapshot : null, time());
         if (empty($rxSelectionCheck['ok'])) {
+            rx_renewal_log('telegram_confirm_selection', (string) $rxSelectionCheck['reason'], ['panel' => $marzban_list_get, 'username' => (string) $nameloc['username'], 'invoice_id' => (string) $nameloc['id_invoice'], 'invoice_status' => $nameloc['Status'] ?? null, 'method' => (string) ($marzban_list_get['Methodextend'] ?? ''), 'volume_gb' => $prodcut['Volume_constraint'], 'days' => $prodcut['Service_time'], 'snapshot' => $rxConfirmSnapshot, 'detail' => $rxSelectionCheck['detail'] ?? null, 'mutation' => 'none']);
             sendmessage($from_id, rxRenewalReasonText((string) $rxSelectionCheck['reason'], $rxSelectionCheck), null, 'HTML');
             return;
         }

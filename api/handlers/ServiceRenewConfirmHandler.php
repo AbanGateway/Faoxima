@@ -76,6 +76,7 @@ final class ServiceRenewConfirmHandler extends BaseHandler
                 $reservation = rxReservationPanelSelection($panel);
                 $selectionCheck = rxReservationNormalizeSelection($reservation, $usableSnapshot, time());
                 if (empty($selectionCheck['ok'])) {
+                    rx_renewal_log('api_confirm_selection', (string)$selectionCheck['reason'], ['panel' => $panel, 'username' => (string)$invoice['username'], 'invoice_id' => (string)$invoice['id_invoice'], 'invoice_status' => $invoice['Status'] ?? null, 'method' => (string)($panel['Methodextend'] ?? ''), 'volume_gb' => $product['Volume_constraint'] ?? null, 'days' => $product['Service_time'] ?? null, 'snapshot' => $snapshotCheck, 'detail' => $selectionCheck['detail'] ?? null, 'mutation' => 'none']);
                     FaoximaResponse::fail(422, rxRenewalReasonText((string)$selectionCheck['reason'], $selectionCheck));
                 }
             }
@@ -83,6 +84,7 @@ final class ServiceRenewConfirmHandler extends BaseHandler
                 'reservation' => $reservation,
                 'snapshot' => $snapshotCheck,
                 'id_invoice' => (string)$invoice['id_invoice'],
+                'stage' => 'api_confirm',
             ]);
             if (!empty($previewCheck['blocked'])) {
                 FaoximaResponse::fail(409, (string)($previewCheck['text'] ?? rxRenewalText('reason_generic')));

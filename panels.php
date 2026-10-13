@@ -2394,7 +2394,16 @@ class ManagePanel
         if (!is_array($product)) {
             $product = array();
         }
+        $rxLogBase = array(
+            'username' => (string) $username,
+            'method' => (string) $Method_extend,
+            'volume_gb' => $new_limit,
+            'days' => $time_day,
+            'ref' => (string) ($rxOptions['ref'] ?? ''),
+            'operation_id' => (string) ($rxOptions['op_id'] ?? ''),
+        );
         if ($panel == false) {
+            rx_renewal_log('extend', 'panel_not_found', $rxLogBase + array('panel_name' => (string) $name_panel, 'mutation' => 'none'));
             return array(
                 'status' => false,
                 'code' => 'panel_not_found',
@@ -2402,10 +2411,15 @@ class ManagePanel
                 'msg' => 'data not found'
             );
         }
+        $rxLogBase['panel'] = $panel;
         $invoice = $this->rxRenewalInvoiceRow($username, $panel);
+        $rxLogBase['invoice_id'] = is_array($invoice) ? (string) ($invoice['id_invoice'] ?? '') : '';
+        $rxLogBase['invoice_status'] = is_array($invoice) ? ($invoice['Status'] ?? null) : null;
         $data_user = $this->DataUser($panel['name_panel'], $username);
         if (!is_array($data_user) || ($data_user['status'] ?? '') == "Unsuccessful") {
             $rxReadMsg = is_array($data_user) ? ($data_user['msg'] ?? '') : 'invalid panel response';
+            $rxReadCode = rx_pf_user_missing_message(is_scalar($rxReadMsg) ? (string) $rxReadMsg : '') ? 'user_missing' : 'panel_read_failed';
+            rx_renewal_log('extend', $rxReadCode, $rxLogBase + array('snapshot_error' => is_scalar($rxReadMsg) ? (string) $rxReadMsg : 'non-scalar panel message', 'mutation' => 'none'));
             return array(
                 'status' => false,
                 'code' => rx_pf_user_missing_message(is_scalar($rxReadMsg) ? (string) $rxReadMsg : '') ? 'user_missing' : 'panel_read_failed',
@@ -2418,11 +2432,7 @@ class ManagePanel
             $rxMode = rxRenewalMode('رزرو اشتراک');
         }
         if ($rxMode === null) {
-            rx_pf_log('RENEWAL_UNKNOWN_METHOD', 'Unknown Methodextend; renewal refused without panel mutation', array(
-                'method' => (string) $Method_extend,
-                'username' => (string) $username,
-                'panel' => (string) $panel['name_panel'],
-            ));
+            rx_renewal_log('extend', 'unsupported_renewal_method', $rxLogBase + array('mutation' => 'none'));
             return array(
                 'status' => false,
                 'code' => 'unsupported_renewal_method',
@@ -2436,6 +2446,9 @@ class ManagePanel
         if (!empty($rxMode['queued']) && !is_array($rxTarget)) {
             $rxRegistered = $this->rxRenewalRegisterReservation($panel, $invoice, $product, $code_product, $new_limit, $time_day, $username, $rxSnapshot, $rxOptions);
             if ($rxRegistered !== null) {
+                if (empty($rxRegistered['status'])) {
+                    rx_renewal_log('extend_reservation', (string) ($rxRegistered['code'] ?? 'reservation_refused'), $rxLogBase + (($rxRegistered['code'] ?? '') === 'admin_blocked' ? array('admin_blocked' => true) : array()) + array('snapshot' => $rxSnapshot, 'error' => $rxRegistered['msg'] ?? null, 'detail' => $rxRegistered['detail'] ?? null, 'mutation' => 'none'));
+                }
                 return $rxRegistered;
             }
             $rxSelection = (array) ($rxOptions['reservation'] ?? array());
@@ -2456,6 +2469,7 @@ class ManagePanel
                 $newConfig = $statement2->fetch(PDO::FETCH_ASSOC);
             }
             if ($newConfig == false) {
+                rx_renewal_log('extend', 'manual_stock_empty', $rxLogBase + array('mutation' => 'none'));
                 return array(
                     'status' => false,
                     'code' => 'manual_stock_empty',
@@ -2505,6 +2519,7 @@ class ManagePanel
             $rxPlan = $rxTarget;
         } else {
             if (empty($rxSnapshot['ok']) || empty($rxSnapshot['exists'])) {
+                rx_renewal_log('extend', 'panel_state_unavailable', $rxLogBase + array('snapshot' => $rxSnapshot, 'snapshot_error' => $rxSnapshot['error'] ?? null, 'mutation' => 'none'));
                 return array(
                     'status' => false,
                     'code' => 'panel_state_unavailable',
@@ -2512,17 +2527,13 @@ class ManagePanel
                     'msg' => 'panel state unavailable: ' . (string) ($rxSnapshot['error'] ?? '')
                 );
             }
-            $rxPlan = rxRenewalPlanForSnapshot($rxSnapshot, $panel, (string) $username, $rxPolicy, $rxResetUsage, $new_limit, $time_day, (string) $rxMode['method']);
+            $rxPlan = rxRenewalPlanForSnapshot($rxSnapshot, $panel, (string) $username, $rxPolicy, $rxResetUsage, $new_limit, $time_day, (string) $rxMode['method'], null, array(
+                'stage' => 'extend_plan',
+                'invoice_id' => $rxLogBase['invoice_id'],
+                'ref' => $rxLogBase['ref'],
+                'operation_id' => $rxLogBase['operation_id'],
+            ));
             if (empty($rxPlan['ok'])) {
-                rx_pf_log('RENEWAL_REFUSED', 'Renewal target could not be built; no panel mutation', array(
-                    'reason' => (string) ($rxPlan['reason'] ?? ''),
-                    'method' => (string) $Method_extend,
-                    'policy' => $rxPolicy,
-                    'username' => (string) $username,
-                    'panel' => (string) $panel['name_panel'],
-                    'before' => rx_pf_limits($rxSnapshot),
-                    'status' => (string) ($rxSnapshot['status'] ?? ''),
-                ));
                 return array(
                     'status' => false,
                     'code' => (string) ($rxPlan['reason'] ?? 'renewal_refused'),
@@ -2737,7 +2748,24 @@ class ManagePanel
             'reset_usage' => !empty($plan['reset_usage']),
             'pending_duration' => $plan['target_pending_duration'] ?? null,
         );
+        $rxLogFail = function ($stage, $reason, $mutation, $error = null) use ($panel, $username, $idInvoice, $invoice, $plan, $diag, $before) {
+            rx_renewal_log($stage, $reason, array(
+                'panel' => $panel,
+                'username' => $username,
+                'invoice_id' => $idInvoice,
+                'invoice_status' => $invoice['Status'] ?? null,
+                'method' => $diag['method'],
+                'policy' => $diag['policy'],
+                'plan' => $plan,
+                'before' => $before,
+                'operation_id' => $diag['operation_id'],
+                'ref' => $diag['ref'],
+                'mutation' => $mutation,
+                'error' => $error,
+            ));
+        };
         if ($ownLock && !rx_rn_lock_acquire($serviceKey, $opId)) {
+            $rxLogFail('apply_lock', 'renewal_in_progress', 'none');
             return array('status' => false, 'code' => 'renewal_in_progress', 'no_mutation' => true, 'operation_id' => $opId, 'msg' => 'another renewal operation is running for this service');
         }
         try {
@@ -2754,9 +2782,9 @@ class ManagePanel
                 'before' => $before,
                 'target' => $plan,
             ))) {
+                $rxLogFail('apply_persist', 'operation_persist_failed', 'none');
                 return array('status' => false, 'code' => 'operation_persist_failed', 'no_mutation' => true, 'operation_id' => $opId, 'msg' => 'renewal operation could not be persisted');
             }
-            rx_pf_log('RENEWAL_APPLY_START', 'Applying renewal plan', $diag + array('before' => $before, 'target' => $target));
             $resetDone = false;
             if (!empty($plan['reset_usage']) && rx_pf_int($data_user['used_traffic'] ?? 0) > 0) {
                 rx_rn_op_update($opId, array('stage' => 'reset_sent'));
@@ -2770,7 +2798,7 @@ class ManagePanel
                     $probeUsed = rx_pf_int($probe['used_traffic']);
                     if ($probeUsed > RX_RN_USAGE_SLACK && $probeUsed + RX_RN_USAGE_SLACK > rx_pf_int($data_user['used_traffic'] ?? 0)) {
                         rx_rn_op_update($opId, array('state' => 'failed', 'stage' => 'reset_failed', 'last_error' => $resetMsg));
-                        rx_pf_log('RENEWAL_APPLY_FAILED', 'Usage reset failed before any change', $diag + array('error' => $resetMsg));
+                        $rxLogFail('apply_reset', 'reset_failed', 'attempted_not_applied', $resetMsg);
                         return array('status' => false, 'code' => 'reset_failed', 'no_mutation' => true, 'operation_id' => $opId, 'msg' => 'error reset : ' . $resetMsg);
                     }
                 }
@@ -2789,7 +2817,7 @@ class ManagePanel
                     && (bool) ($probe['pending'] ?? false) === (bool) ($plan['before_pending'] ?? false);
                 if ($class === 'before' && $untouched && !$resetDone) {
                     rx_rn_op_update($opId, array('state' => 'failed', 'stage' => 'modify_failed', 'last_error' => $writeMsg));
-                    rx_pf_log('RENEWAL_APPLY_FAILED', 'Panel rejected the renewal; service unchanged', $diag + array('error' => $writeMsg));
+                    $rxLogFail('apply_write', 'panel_write_failed', 'attempted_not_applied', $writeMsg);
                     return array('status' => false, 'code' => 'panel_write_failed', 'no_mutation' => true, 'operation_id' => $opId, 'msg' => $writeMsg);
                 }
                 if ($class === 'before') {
@@ -2805,7 +2833,6 @@ class ManagePanel
             if (!empty($verify['ok'])) {
                 rx_rn_op_update($opId, array('state' => 'verified', 'stage' => 'done', 'result_state' => $verify['after'], 'last_error' => null));
                 $this->rxRenewalLocalSuccess($panel, $username, $idInvoice);
-                rx_pf_log('RENEWAL_APPLY_VERIFIED', 'Renewal verified on panel', $diag + array('before' => $before, 'target' => $target, 'after' => $verify['after']));
                 return array(
                     'status' => true,
                     'data' => $write['data'] ?? null,
@@ -2858,7 +2885,20 @@ class ManagePanel
     private function rxRenewalUncertain($opId, array $plan, array $before, $after, $reason, array $diag)
     {
         rx_rn_op_update($opId, array('state' => 'uncertain', 'last_error' => $reason, 'result_state' => $after, 'next_attempt_at' => time() + 120));
-        rx_pf_log('RENEWAL_APPLY_UNCERTAIN', $reason, $diag + array('before' => $before, 'target' => array('data_limit' => $plan['data_limit'] ?? null, 'expire' => $plan['expire'] ?? null, 'reset_usage' => !empty($plan['reset_usage'])), 'after' => $after));
+        rx_renewal_log('apply_uncertain', trim((string) $reason) !== '' ? (string) $reason : 'pending_verification', array(
+            'panel_name' => (string) ($diag['panel'] ?? ''),
+            'panel_type' => (string) ($diag['panel_type'] ?? ''),
+            'username' => (string) ($diag['username'] ?? ''),
+            'method' => $diag['method'] ?? '',
+            'policy' => $diag['policy'] ?? '',
+            'plan' => $plan,
+            'before' => $before,
+            'after' => is_array($after) ? $after : null,
+            'operation_id' => $opId,
+            'ref' => $diag['ref'] ?? '',
+            'mutation' => 'uncertain',
+            'error' => $reason,
+        ));
         if (!in_array((string) ($diag['source'] ?? ''), array('payment', 'reservation'), true)) {
             rx_pf_alert_admin('renewal:' . $opId, 'نتیجه تمدید هنوز تأیید نشده و به‌صورت خودکار بررسی می‌شود (پنل: ' . (string) ($diag['panel'] ?? '') . ')', array('username' => (string) ($diag['username'] ?? '')));
         }

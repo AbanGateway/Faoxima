@@ -3745,18 +3745,19 @@ $textonebuy
                 $rxBeforeState = null;
                 $rxTargetState = null;
                 if ($rxRenewMode === null) {
+                    rx_renewal_log('paid_method', 'unknown_renewal_method', ['panel' => $marzban_list_get, 'username' => (string) $nameloc['username'], 'invoice_id' => (string) ($nameloc['id_invoice'] ?? ''), 'invoice_status' => $nameloc['Status'] ?? null, 'method' => (string) ($marzban_list_get['Methodextend'] ?? ''), 'volume_gb' => $prodcut['Volume_constraint'] ?? null, 'days' => $prodcut['Service_time'] ?? null, 'ref' => (string) $order_id, 'mutation' => 'none']);
                     return rx_pf_manual_review($order_id, $rxToken, 'unknown_renewal_method: ' . (string) ($marzban_list_get['Methodextend'] ?? ''), ['username' => (string) $nameloc['username']]);
                 }
                 if ($rxReconcilable) {
                     if (empty($rxSnap['ok'])) {
+                        rx_renewal_log('paid_snapshot', 'panel_read_failed', ['panel' => $marzban_list_get, 'username' => (string) $nameloc['username'], 'invoice_id' => (string) ($nameloc['id_invoice'] ?? ''), 'invoice_status' => $nameloc['Status'] ?? null, 'method' => (string) ($marzban_list_get['Methodextend'] ?? ''), 'volume_gb' => $prodcut['Volume_constraint'] ?? null, 'days' => $prodcut['Service_time'] ?? null, 'snapshot' => $rxSnap, 'ref' => (string) $order_id, 'mutation' => 'none']);
                         return rx_pf_abort($order_id, $rxToken, 'renewal_panel_read_failed', true);
                     }
                     if (!empty($rxSnap['exists'])) {
-                        $rxPlan = rxRenewalPlanForSnapshot($rxSnap, $marzban_list_get, (string) $nameloc['username'], $rxPolicy, $rxResetUsage, $prodcut['Volume_constraint'], $prodcut['Service_time'], (string) $rxRenewMode['method']);
+                        $rxPlan = rxRenewalPlanForSnapshot($rxSnap, $marzban_list_get, (string) $nameloc['username'], $rxPolicy, $rxResetUsage, $prodcut['Volume_constraint'], $prodcut['Service_time'], (string) $rxRenewMode['method'], null, ['stage' => 'paid_plan', 'invoice_id' => (string) ($nameloc['id_invoice'] ?? ''), 'ref' => (string) $order_id]);
                         if (empty($rxPlan['ok'])) {
                             $extend = ['status' => false, 'code' => (string) ($rxPlan['reason'] ?? 'renewal_refused'), 'no_mutation' => true, 'plan' => $rxPlan, 'msg' => 'renewal refused: ' . (string) ($rxPlan['reason'] ?? '')];
                             $rxApply = false;
-                            rx_pf_log('RENEWAL_REFUSED', 'Paid renewal refused before panel mutation', ['id_order' => $order_id, 'username' => (string) $nameloc['username'], 'panel' => (string) $marzban_list_get['name_panel'], 'policy' => $rxPolicy, 'reason' => (string) ($rxPlan['reason'] ?? '')]);
                         } else {
                             $rxBeforeState = array_merge(rx_pf_limits($rxSnap), [
                                 'status' => (string) ($rxSnap['status'] ?? ''),
