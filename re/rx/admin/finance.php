@@ -564,13 +564,29 @@ if (false) {
     $inboundInputRaw = trim($text);
     $typepanelInbound = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
     if (is_array($typepanelInbound) && ($typepanelInbound['type'] ?? '') === 'x-ui_single' && xui_panel_uses_token($typepanelInbound)) {
+        xcd_begin('admin_getinboundiid', $typepanelInbound, null, $inboundInputRaw);
         $sampleClient = xui_get_full_client($typepanelInbound, $inboundInputRaw);
+        xcd_event('panel_inbounds.sample_client_lookup', array(
+            'sample_client_is_not_the_affected_service' => true,
+            'sample_lookup_status' => !empty($sampleClient['status']),
+            'sample_inbound_ids' => is_array($sampleClient['inboundIds'] ?? null) ? array_map('intval', $sampleClient['inboundIds']) : null,
+            'sample_inbound_count' => is_array($sampleClient['inboundIds'] ?? null) ? count($sampleClient['inboundIds']) : null,
+            'previous_panel_inboundid' => xcd_shape($typepanelInbound['inboundid'] ?? null),
+            'lookup_message' => isset($sampleClient['msg']) ? xcd_sanitize_text($sampleClient['msg'], 160) : null,
+        ), !empty($sampleClient['status']) ? 'info' : 'warn');
         if (empty($sampleClient['status']) || empty($sampleClient['inboundIds'])) {
+            xcd_finish('admin_getinboundiid_sample_not_found');
             nm_adminInstantReply($from_id, "❌ کلاینتی با این نام کاربری روی پنل پیدا نشد یا به هیچ اینباندی متصل نیست. نام کاربری صحیح یک کلاینت موجود روی پنل را ارسال کنید.", $backadmin, 'HTML');
             return;
         }
         $detectedIds = array_map('intval', $sampleClient['inboundIds']);
         $text = implode(',', $detectedIds);
+        xcd_event('panel_inbounds.saved', array('saved_value' => $text, 'saved_inbound_count' => count($detectedIds), 'source' => 'sample_client_inboundIds'));
+        xcd_finish('admin_getinboundiid_saved');
+        $xsyncRead = xsync_fetch_client($typepanelInbound, $inboundInputRaw);
+        if (!empty($xsyncRead['ok']) && !empty($xsyncRead['ids'])) {
+            xsync_enable_panel($typepanelInbound['name_panel'], $inboundInputRaw, $xsyncRead['ids'], $typepanelInbound['inboundid'] ?? '');
+        }
         nm_adminInstantReply($from_id, "✅ شناسه اینباند(های) [{$text}] از روی کلاینت «{$inboundInputRaw}» تشخیص داده و ذخیره شد", $optionX_ui_single, 'HTML');
         update("marzban_panel", "inboundid", $text, "name_panel", $user['Processing_value']);
         step('PanelMenu', $from_id);

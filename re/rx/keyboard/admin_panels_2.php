@@ -492,10 +492,13 @@ function keyboard_config($config_split,$id_invoice,$back_active = true,$page = 0
     $rxConfigPageSize = 5;
 
     $rows = [];
+    $xcdDropped = [];
+    $xcdInputCount = is_array($config_split) ? count($config_split) : 0;
     $config_split = is_array($config_split) ? $config_split : [];
     foreach (array_values($config_split) as $i => $config){
         if(!is_string($config) || $config === ''){
             error_log('Invalid configuration entry encountered while building keyboard');
+            $xcdDropped[] = ['index' => $i, 'reason' => 'non_string_or_empty'];
             continue;
         }
 
@@ -525,6 +528,7 @@ function keyboard_config($config_split,$id_invoice,$back_active = true,$page = 0
                 continue;
             }
             error_log('Malformed configuration string: missing scheme separator');
+            $xcdDropped[] = ['index' => $i, 'reason' => 'missing_scheme_separator'];
             continue;
         }
 
@@ -534,6 +538,7 @@ function keyboard_config($config_split,$id_invoice,$back_active = true,$page = 0
             $decoded = base64_decode($payload, true);
             if($decoded === false){
                 error_log('Failed to decode base64 configuration payload');
+                $xcdDropped[] = ['index' => $i, 'reason' => 'base64_payload_decode_failed'];
                 continue;
             }
             $payload = $decoded;
@@ -600,6 +605,25 @@ function keyboard_config($config_split,$id_invoice,$back_active = true,$page = 0
     $keyboard_config['inline_keyboard'][] = [['text' => $textbotlang['users']['stateus']['backinfo'], 'callback_data' => "product_$id_invoice"]];
     }
     $rowCount = $totalRows;
+    if (function_exists('xcd_active') && xcd_active()) {
+        xcd_count('keyboard_row_count', $totalRows, 'keyboard_construction');
+        if (count($xcdDropped) > 0) {
+            xcd_reason('keyboard_construction', count($xcdDropped) . ' of ' . $xcdInputCount . ' entries dropped while building rows');
+        }
+        xcd_event('keyboard.built', [
+            'input_entry_count' => $xcdInputCount,
+            'input_entry_types' => xcd_entry_types($config_split),
+            'generated_row_count' => $totalRows,
+            'dropped_entry_count' => count($xcdDropped),
+            'dropped_entries' => array_slice($xcdDropped, 0, 20),
+            'page_size' => $rxConfigPageSize,
+            'total_pages' => $totalPages,
+            'displayed_page' => $page,
+            'rows_on_displayed_page' => count($pageRows),
+            'has_navigation_row' => $totalPages > 1,
+            'back_button' => (bool) $back_active,
+        ], count($xcdDropped) > 0 ? 'warn' : 'info');
+    }
     $encoded = json_encode($keyboard_config);
     if ($encoded === false) {
         error_log('keyboard_config json_encode failed: ' . json_last_error_msg());
