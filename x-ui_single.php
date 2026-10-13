@@ -689,11 +689,10 @@ if (!function_exists('xui_wg_conf_filename')) {
         }
         $base = preg_replace('#[\\/:*?"<>|\s_]+#u', '-', $remark);
         $base = trim((string) preg_replace('/-+/', '-', $base), '-');
-        if ($base === '' || preg_match('/^[0-9-]+$/', $base)) {
-            $prefix = ($protocol === 'amneziawg' ? 'amneziawg' : 'wireguard');
-            $base = $base === '' ? $prefix . '-' . ($index + 1) : $prefix . '-' . $base;
-        }
         $base = rtrim(substr($base, 0, 15), '-.');
+        if ($base === '') {
+            $base = $protocol === 'amneziawg' ? 'amneziawg' : 'wireguard';
+        }
         return $base . '.conf';
     }
 }
@@ -710,7 +709,7 @@ function build_single_config_from_inbound($inb, $client, $publicHost)
         if (!$conf) {
             return null;
         }
-        $remark = $inb['remark'] ?? ($client['email'] ?? 'config');
+        $remark = $inb['remark'] ?? '';
         $filename = preg_replace('/[^A-Za-z0-9-]+/', '-', str_replace('_', '-', (string) $remark));
         $filename = rtrim(substr(trim((string) preg_replace('/-+/', '-', $filename), '-'), 0, 15), '-.');
         if ($filename === '') {

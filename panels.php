@@ -693,6 +693,7 @@ class ManagePanel
                     'content'  => $mContent,
                     'file_ext' => (string)($mRow['file_ext'] ?? ''),
                     'sub_link' => $mSub,
+                    'name'     => (string)($mRow['namerecord'] ?? ''),
                 );
             }
             $Output['manual_items'] = $manualItemsOut;
@@ -1352,6 +1353,7 @@ class ManagePanel
                         'content' => (string) ($mr['contentrecord'] ?? ''),
                         'file_ext' => (string) ($mr['file_ext'] ?? ''),
                         'sub_link' => (string) ($mr['sub_link'] ?? ''),
+                        'name' => (string) ($mr['namerecord'] ?? ''),
                     );
                     if ($manualUnifiedSub === '' && trim((string) ($mr['sub_link'] ?? '')) !== '') {
                         $manualUnifiedSub = trim((string) $mr['sub_link']);

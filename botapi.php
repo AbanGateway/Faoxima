@@ -2602,7 +2602,9 @@ function normalizeConfigFilename($filename, $prefix = '', $wireguard = false)
     $filename = basename(str_replace('\\', '/', (string) $filename));
     $extension = strtolower((string) pathinfo($filename, PATHINFO_EXTENSION));
     $stem = (string) pathinfo($filename, PATHINFO_FILENAME);
-    $stem = preg_replace('/[^A-Za-z0-9.-]+/', '-', str_replace('_', '-', $stem));
+    $stem = $wireguard
+        ? preg_replace('/[^A-Za-z0-9.-]+/', '-', str_replace('_', '-', $stem))
+        : preg_replace('/[^\p{L}\p{N}.-]+/u', '-', str_replace('_', '-', $stem));
     $stem = trim((string) preg_replace('/-+/', '-', $stem), '-.');
     $prefix = preg_replace('/[^A-Za-z0-9.-]+/', '-', str_replace('_', '-', (string) $prefix));
     $prefix = trim((string) preg_replace('/-+/', '-', $prefix), '-.');

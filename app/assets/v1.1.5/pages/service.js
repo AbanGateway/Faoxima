@@ -263,14 +263,8 @@ function wgConfFilename(link, protocol, index) {
         }
     }
     let base = remark.replace(/_/g, '-').replace(/[\/:*?"<>|\s]+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
-    const prefix = protocol === 'amneziawg' ? 'amneziawg' : 'wireguard';
-    if (!base || /^[0-9-]+$/.test(base)) {
-        base = base ? `${prefix}-${base}` : `${prefix}-${(index || 0) + 1}`;
-    }
-    if (__cfgFilePrefix && base.toLowerCase() !== __cfgFilePrefix.toLowerCase() && !base.toLowerCase().startsWith(`${__cfgFilePrefix.toLowerCase()}-`)) {
-        base = `${__cfgFilePrefix}-${base}`;
-    }
     base = base.slice(0, 15).replace(/[-.]+$/g, '');
+    if (!base) base = protocol === 'amneziawg' ? 'amneziawg' : 'wireguard';
     return base + '.conf';
 }
 
@@ -286,10 +280,8 @@ function configDownloadFilename(value, fallback, wireguard) {
     const dot = name.lastIndexOf('.');
     let ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : (wireguard ? 'conf' : 'bin');
     let stem = dot > 0 ? name.slice(0, dot) : name;
-    stem = stem.replace(/_/g, '-').replace(/[^A-Za-z0-9.-]+/g, '-').replace(/-+/g, '-').replace(/^[-.]+|[-.]+$/g, '') || (wireguard ? 'wireguard' : 'config');
-    if (__cfgFilePrefix && stem.toLowerCase() !== __cfgFilePrefix.toLowerCase() && !stem.toLowerCase().startsWith(`${__cfgFilePrefix.toLowerCase()}-`)) {
-        stem = `${__cfgFilePrefix}-${stem}`;
-    }
+    const stemPattern = wireguard ? /[^A-Za-z0-9.-]+/g : /[^\p{L}\p{N}.-]+/gu;
+    stem = stem.replace(/_/g, '-').replace(stemPattern, '-').replace(/-+/g, '-').replace(/^[-.]+|[-.]+$/g, '') || (wireguard ? 'wireguard' : 'config');
     if (wireguard) {
         stem = stem.slice(0, 15).replace(/[-.]+$/g, '');
         ext = 'conf';

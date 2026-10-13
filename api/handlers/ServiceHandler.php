@@ -204,7 +204,7 @@ final class ServiceHandler extends BaseHandler
         $config = [];
         $type = $panel['type'] ?? '';
         $filePrefix = trim((string)($panel['namecustom'] ?? ''));
-        if (strtolower($filePrefix) === 'none') {
+        if (strtolower($filePrefix) === 'none' || $type !== 'WGDashboard') {
             $filePrefix = '';
         }
         if (in_array($type, ['marzban', 'x-ui_single', 'eylanpanel', 'pasarguard'], true)) {
