@@ -460,6 +460,17 @@ function panel_features_all_off_json()
     }
     return json_encode($out, JSON_UNESCAPED_UNICODE);
 }
+function panel_features_new_panel_defaults_json()
+{
+    $out = [];
+    foreach (panel_feature_keys() as $featureKey) {
+        $out[$featureKey] = "0";
+    }
+    foreach (['categorygeneral', 'configbtn', 'directbuy'] as $featureKey) {
+        $out[$featureKey] = "1";
+    }
+    return json_encode($out, JSON_UNESCAPED_UNICODE);
+}
 function panel_feature_global_value($table, $globalKey)
 {
     if ($table === "setting") {
