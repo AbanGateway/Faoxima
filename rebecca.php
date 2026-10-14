@@ -88,7 +88,7 @@ function rebeccaApiRequest(array $panelConfig, string $method, string $endpoint,
     return $response;
 }
 
-function rebeccaDecodeResponse(array $response)
+function rebeccaDecodeResponse(array $response, bool $strictJson = false)
 {
     if (!empty($response['error'])) {
         return [
@@ -99,10 +99,13 @@ function rebeccaDecodeResponse(array $response)
 
     $statusCode = $response['status'] ?? null;
     $decodedBody = [];
+    $jsonError = null;
     if (!empty($response['body'])) {
         $decoded = json_decode($response['body'], true);
         if (json_last_error() === JSON_ERROR_NONE) {
             $decodedBody = $decoded;
+        } else {
+            $jsonError = json_last_error_msg();
         }
     }
 
@@ -120,6 +123,15 @@ function rebeccaDecodeResponse(array $response)
             'status' => false,
             'msg' => $message,
             'http_code' => (int) $statusCode
+        ];
+    }
+
+    if ($strictJson && ($jsonError !== null || empty($response['body']) || !is_array($decodedBody))) {
+        return [
+            'status' => false,
+            'msg' => $jsonError !== null ? 'Invalid JSON from panel: ' . $jsonError : 'Empty or non-object response from panel',
+            'http_code' => $statusCode !== null ? (int) $statusCode : null,
+            'invalid_response' => true
         ];
     }
 
@@ -274,7 +286,7 @@ function rebeccaGetUser($namePanel, string $username)
     }
     $encodedUsername = urlencode($username);
     $response = rebeccaApiRequest($config, 'GET', "/api/user/{$encodedUsername}");
-    return rebeccaDecodeResponse($response);
+    return rebeccaDecodeResponse($response, true);
 }
 
 function rebeccaGetOnHoldUsers($namePanel)
@@ -385,7 +397,7 @@ function rebeccaGetSubInfo($namePanel, string $username, string $credentialKey)
     $encodedUsername = urlencode($username);
     $encodedKey = urlencode($credentialKey);
     $response = rebeccaApiRequest($config, 'GET', "/sub/{$encodedUsername}/{$encodedKey}/info");
-    return rebeccaDecodeResponse($response);
+    return rebeccaDecodeResponse($response, true);
 }
 
 function rebeccaFormatConnectionInfoBlock(string $title, array $fields)
@@ -523,10 +535,10 @@ function rebeccaBuildDisplayLinks($namePanel, array $userData, string $username)
     }
 
     $subInfoResponse = rebeccaGetSubInfo($namePanel, $username, $credentialKey);
-    if ($subInfoResponse['status'] === false) {
+    if (($subInfoResponse['status'] ?? false) === false) {
         return $taggedLinks;
     }
-    $subInfo = $subInfoResponse['data'];
+    $subInfo = $subInfoResponse['data'] ?? null;
     if (!is_array($subInfo)) {
         return $taggedLinks;
     }
@@ -562,8 +574,9 @@ function rebeccaConfigDownloadInfo(string $link)
 function rebeccaDownloadConfigFile(string $url, string $destPath)
 {
     $ch = curl_init($url);
-    $fp = fopen($destPath, 'wb');
+    $fp = @fopen($destPath, 'wb');
     if ($fp === false) {
+        curl_close($ch);
         return false;
     }
     $timeoutInfo = faoxima_panel_timeout_info();
@@ -580,7 +593,7 @@ function rebeccaDownloadConfigFile(string $url, string $destPath)
     curl_close($ch);
     fclose($fp);
 
-    if (!$success || $httpCode >= 400) {
+    if (!$success || $httpCode >= 400 || (int) @filesize($destPath) === 0) {
         @unlink($destPath);
         return false;
     }

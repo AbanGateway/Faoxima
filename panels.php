@@ -1458,6 +1458,7 @@ class ManagePanel
                 'online_at' => $userData['online_at'] ?? null,
                 'used_traffic' => intval($userData['used_traffic'] ?? 0),
                 'links' => $links,
+                'links_diagnostic' => array('panel_type' => 'rebecca', 'outcome' => empty($links) ? 'empty' : 'ok'),
                 'subscription_url' => $subscriptionUrl,
                 'sub_updated_at' => null,
                 'sub_last_user_agent' => null,

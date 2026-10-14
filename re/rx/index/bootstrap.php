@@ -944,6 +944,24 @@ if ($setting['roll_Status'] == "rolleon" && $user['roll_Status'] == 0 && ($text 
     sendmessage($from_id, $datatextbot['text_roll'], $confrimrolls, 'html');
     return;
 }
+if (!function_exists('rx_config_deliver_list')) {
+    function rx_config_deliver_list($chatId, $messageId, $text, $keyboard)
+    {
+        $result = Editmessagetext($chatId, $messageId, $text, $keyboard);
+        $ok = is_array($result) && !empty($result['ok']);
+        if (!$ok && is_array($result) && stripos((string) ($result['description'] ?? ''), 'message is not modified') !== false) {
+            return true;
+        }
+        if (!$ok) {
+            $result = sendmessage($chatId, $text, $keyboard, 'html');
+            $ok = is_array($result) && !empty($result['ok']);
+        }
+        if (!$ok) {
+            sendmessage($chatId, "❌ نمایش لیست کانفیگ‌ها ناموفق بود. لطفاً دوباره تلاش کنید.", null, 'html');
+        }
+        return $ok;
+    }
+}
 if ($text == "✅ قوانین را می پذیرم" or $datain == "acceptrule") {
     if ($setting['roll_Status'] == "rolleon" && intval($user['roll_Status']) == 0) {
         $rxStartLanding = true;
@@ -2510,7 +2528,7 @@ $nameconfig";
         sendmessage($from_id, keyboard_config_unavailable_text($DataUserOut, 'invalid'), null, 'html');
         return;
     }
-    Editmessagetext($from_id, $message_id, "📌 از لیست زیر یک کانفیگ را انتخاب استفاده نمایید.", $configKeyboard);
+    rx_config_deliver_list($from_id, $message_id, "📌 از لیست زیر یک کانفیگ را انتخاب استفاده نمایید.", $configKeyboard);
 } elseif (preg_match('/config_(\w+)/', $datain, $dataget) || (is_string($text) && strpos($text, "/link ") !== false)) {
     $textCommand = is_string($text) ? $text : '';
     if ($textCommand !== '' && $textCommand[0] === "/") {
@@ -2564,7 +2582,7 @@ $nameconfig";
             sendmessage($from_id, $datatextbot['dyn_errors_config_read_error'] ?? "❌  خطا در خواندن اطلاعات کانفیگ با پشتیبانی در ارتباط باشید.", null, 'html');
             return;
         }
-        Editmessagetext($from_id, $message_id, "📌 از لیست زیر یک کانفیگ را انتخاب استفاده نمایید.", keyboard_config($manualConfigs, $nameloc['id_invoice']));
+        rx_config_deliver_list($from_id, $message_id, "📌 از لیست زیر یک کانفیگ را انتخاب استفاده نمایید.", keyboard_config($manualConfigs, $nameloc['id_invoice']));
         return;
     }
     $DataUserOut = $ManagePanel->DataUser($nameloc['Service_location'], $nameloc['username']);
@@ -2598,7 +2616,7 @@ $nameconfig";
         sendmessage($from_id, keyboard_config_unavailable_text($DataUserOut, 'invalid'), null, 'html');
         return;
     }
-    Editmessagetext($from_id, $message_id, "📌 از لیست زیر یک کانفیگ را انتخاب استفاده نمایید.", $configKeyboard);
+    rx_config_deliver_list($from_id, $message_id, "📌 از لیست زیر یک کانفیگ را انتخاب استفاده نمایید.", $configKeyboard);
 } elseif (preg_match('/configget_(.*)_(.*)/', $datain, $dataget)) {
     $id_invoice = $dataget[1];
     $nameloc = select("invoice", "*", "id_invoice", $id_invoice, "select");
@@ -2670,6 +2688,10 @@ $nameconfig";
         return;
     }
     $rwCgSel = $DataUserOut['links'][$dataget[2]] ?? '';
+    if ($dataget[2] != "1520" && !isset($DataUserOut['links'][$dataget[2]])) {
+        sendmessage($from_id, $datatextbot['dyn_errors_config_read_from_panel_error'] ?? "❌ خطا در خواندن کانفیگ از پنل.", null, 'html');
+        return;
+    }
     $config = "";
     if ($dataget[2] == "1520") {
         for ($i = 0; $i < count($DataUserOut['links']); ++$i) {
@@ -2739,8 +2761,11 @@ $nameconfig";
             $rebeccaPublicName = normalizeConfigFilename($rebeccaDownloadInfo['filename'], '', $rebeccaDownloadInfo['kind'] === 'wireguard');
             $rebeccaDownloadDest = "{$from_id}-" . bin2hex(random_bytes(3)) . '-' . $rebeccaPublicName;
             if (rebeccaDownloadConfigFile($rebeccaDownloadInfo['url'], $rebeccaDownloadDest)) {
-                sendDocument($from_id, $rebeccaDownloadDest, "⚙️ کانفیگ شما", $rebeccaPublicName);
-                unlink($rebeccaDownloadDest);
+                $rebeccaSendResult = sendDocument($from_id, $rebeccaDownloadDest, "⚙️ کانفیگ شما", $rebeccaPublicName);
+                @unlink($rebeccaDownloadDest);
+                if (!is_array($rebeccaSendResult) || empty($rebeccaSendResult['ok'])) {
+                    sendmessage($from_id, $datatextbot['dyn_errors_config_read_from_panel_error'] ?? "❌ خطا در خواندن کانفیگ از پنل.", null, 'html');
+                }
             } else {
                 sendmessage($from_id, $datatextbot['dyn_errors_config_read_from_panel_error'] ?? "❌ خطا در خواندن کانفیگ از پنل.", null, 'html');
             }
