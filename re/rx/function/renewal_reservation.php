@@ -128,6 +128,28 @@ if (!function_exists('rx_rn_ensure_schema')) {
                 KEY idx_ro_state (state, next_attempt_at),
                 KEY idx_ro_service (service_key)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            $opColumns = [];
+            foreach ($pdo->query("SHOW COLUMNS FROM renewal_operation")->fetchAll(PDO::FETCH_ASSOC) as $opCol) {
+                $opColumns[(string) $opCol['Field']] = true;
+            }
+            foreach ([
+                'finalize_context' => 'MEDIUMTEXT NULL',
+                'finalize_state' => 'VARCHAR(20) NULL',
+                'finalize_attempts' => 'INT UNSIGNED NOT NULL DEFAULT 0',
+                'finalize_next' => 'INT UNSIGNED NULL',
+                'finalize_error' => 'TEXT NULL',
+                'finalized_at' => 'INT UNSIGNED NULL',
+                'notify_state' => 'VARCHAR(20) NULL',
+                'notify_attempts' => 'INT UNSIGNED NOT NULL DEFAULT 0',
+                'notify_next' => 'INT UNSIGNED NULL',
+                'notify_claimed_at' => 'INT UNSIGNED NULL',
+                'notify_token' => 'CHAR(16) NULL',
+                'notify_error' => 'VARCHAR(255) NULL',
+            ] as $opName => $opDefinition) {
+                if (!isset($opColumns[$opName])) {
+                    $pdo->exec("ALTER TABLE renewal_operation ADD COLUMN {$opName} {$opDefinition}");
+                }
+            }
             $panelTable = $pdo->query("SHOW TABLES LIKE 'marzban_panel'");
             if ($panelTable !== false && $panelTable->fetch(PDO::FETCH_NUM) !== false) {
                 $settingsColumn = $pdo->query("SHOW COLUMNS FROM marzban_panel LIKE 'reservation_settings'");
@@ -256,8 +278,8 @@ if (!function_exists('rx_rn_op_start')) {
         try {
             $now = time();
             $stmt = $pdo->prepare(
-                "INSERT INTO renewal_operation (op_id, source, ref, service_key, username, name_panel, id_invoice, method, policy, state, stage, attempt_count, before_state, target_state, created_at, updated_at) "
-                . "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'applying', 'planned', 1, ?, ?, ?, ?) "
+                "INSERT INTO renewal_operation (op_id, source, ref, service_key, username, name_panel, id_invoice, method, policy, state, stage, attempt_count, before_state, target_state, finalize_context, finalize_state, created_at, updated_at) "
+                . "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'applying', 'planned', 1, ?, ?, ?, ?, ?, ?) "
                 . "ON DUPLICATE KEY UPDATE state = 'applying', stage = 'planned', attempt_count = attempt_count + 1, target_state = VALUES(target_state), updated_at = VALUES(updated_at)"
             );
             $stmt->execute([
@@ -272,6 +294,8 @@ if (!function_exists('rx_rn_op_start')) {
                 isset($op['policy']) ? (string) $op['policy'] : null,
                 rx_pf_json($op['before'] ?? null),
                 rx_pf_json($op['target'] ?? null),
+                is_array($op['finalize'] ?? null) ? rx_pf_json($op['finalize']) : null,
+                is_array($op['finalize'] ?? null) ? 'pending' : null,
                 $now,
                 $now,
             ]);
@@ -1204,6 +1228,9 @@ if (!function_exists('rxRenewalOpsReconcile')) {
         if (!($pdo instanceof PDO) || !rx_rn_ensure_schema()) {
             return $results;
         }
+        if (function_exists('rxArFinalizePending')) {
+            rxArFinalizePending($now, 10);
+        }
         try {
             $pdo->prepare("UPDATE renewal_operation SET state = 'uncertain', stage = CONCAT(stage, ':interrupted'), updated_at = ? WHERE state = 'applying' AND source NOT IN ('payment', 'reservation') AND updated_at < ?")
                 ->execute([$now, $now - RX_RN_LOCK_SECONDS]);
@@ -1279,6 +1306,9 @@ if (!function_exists('rxRenewalOpReconcileOne')) {
             }
             if ($class === 'target') {
                 rx_rn_op_update($opId, ['state' => 'verified', 'stage' => 'reconciled', 'result_state' => rx_pf_limits($snapshot)]);
+                if (function_exists('rxArFinalizeOperation')) {
+                    rxArFinalizeOperation($opId);
+                }
                 $panel = select('marzban_panel', '*', 'name_panel', (string) $op['name_panel'], 'select');
                 if (is_array($panel) && method_exists($managePanel, 'rxRenewalLocalSuccess')) {
                     $managePanel->rxRenewalLocalSuccess($panel, (string) $op['username'], (string) ($op['id_invoice'] ?? ''));

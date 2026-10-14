@@ -1180,6 +1180,10 @@ if (!function_exists('rxRenewalTextDefaults')) {
             'policy_carry_traffic_reset_time' => 'حفظ حجم باقی‌مانده + افزودن حجم خریداری‌شده؛ زمان خریداری‌شده از لحظه اجرا شروع می‌شود',
             'policy_traffic_only' => 'فقط حجم: حجم باقی‌مانده + حجم خریداری‌شده؛ تاریخ انقضا تغییر نمی‌کند',
             'policy_time_only' => 'فقط زمان: زمان باقی‌مانده + زمان خریداری‌شده؛ حجم و مصرف تغییر نمی‌کند',
+            'policy_reset_traffic_keep_time' => 'ریست حجم (فقط حجم خریداری‌شده)؛ تاریخ انقضا تغییر نمی‌کند',
+            'policy_keep_traffic_reset_time' => 'حجم و مصرف بدون تغییر؛ زمان خریداری‌شده از لحظه اجرا شروع می‌شود',
+            'policy_short_reset_traffic_keep_time' => 'ریست حجم، انقضا بدون تغییر',
+            'policy_short_keep_traffic_reset_time' => 'حجم بدون تغییر، ریست زمان',
             'policy_short_carry_all' => 'حفظ حجم و زمان',
             'policy_short_reset_all' => 'ریست کامل حجم و زمان',
             'policy_short_reset_traffic_append_time' => 'ریست حجم، حفظ زمان',
@@ -1296,6 +1300,76 @@ if (!function_exists('rxRenewalTextDefaults')) {
             'result_line_expire' => '⏳ انقضا : {before} ← {after}',
             'result_line_limit' => '📦 حجم کل : {before} ← {after}',
             'result_line_remaining' => '🔋 حجم باقی‌مانده : {before} ← {after}',
+            'adm_title' => '🔄 تمدید سرویس توسط مدیر',
+            'adm_service_lines' => "👤 نام کاربری : <code>{username}</code>\n📍 پنل : {panel}",
+            'adm_state_unchanged' => 'بدون تغییر',
+            'adm_state_unlimited' => 'نامحدود (صفر)',
+            'adm_state_unset' => 'انتخاب نشده',
+            'adm_package_product' => '«{name}» ({volume} / {days})',
+            'adm_package_custom' => 'حجم : {volume} | زمان : {days}',
+            'adm_btn_back' => '◀️ مرحله قبل',
+            'adm_btn_service' => '🧾 بازگشت به مدیریت سرویس',
+            'adm_btn_admin' => '🏠 منوی مدیریت',
+            'adm_btn_cancel' => '❌ لغو تمدید',
+            'adm_btn_product' => '🛍 انتخاب محصول',
+            'adm_btn_custom' => '✍️ حجم و زمان دلخواه',
+            'adm_btn_keep_traffic' => '📦 حجم بدون تغییر',
+            'adm_btn_keep_time' => '📅 انقضا بدون تغییر',
+            'adm_btn_continue' => '➡️ ادامه',
+            'adm_btn_notify_on' => 'اطلاع‌رسانی به مشتری',
+            'adm_btn_notify_off' => 'بدون اطلاع‌رسانی',
+            'adm_btn_preview' => '📋 پیش‌نمایش',
+            'adm_btn_refresh' => '♻️ بروزرسانی پیش‌نمایش',
+            'adm_btn_confirm' => '✅ تایید و اجرا',
+            'adm_src_prompt' => 'بسته تمدید را چگونه تعیین می‌کنید؟',
+            'adm_prod_prompt' => '🛍 یکی از محصولات مجاز این پنل را انتخاب کنید. حجم و زمان محصول اعمال می‌شود و مبلغی از مشتری کسر نمی‌شود.',
+            'adm_prod_empty' => '⚠️ محصول مجازی برای این پنل یافت نشد؛ از حجم و زمان دلخواه استفاده کنید.',
+            'adm_vol_prompt' => "📦 حجم تمدید را به گیگابایت و به‌صورت عدد ارسال کنید.\n\n0 = حجم نامحدود (ارسال صفر به معنی «بدون تغییر» نیست)\n«حجم بدون تغییر» = حجم کل و مصرف فعلی دست‌نخورده می‌ماند و حجمی اضافه یا ریست نمی‌شود",
+            'adm_days_prompt' => "📅 زمان تمدید را به روز و به‌صورت عدد ارسال کنید.\n\n0 = زمان نامحدود (ارسال صفر به معنی «بدون تغییر» نیست)\n«انقضا بدون تغییر» = تاریخ انقضا یا مدت انتظار اولین اتصال دست‌نخورده می‌ماند و روزی اضافه یا شروع مجدد نمی‌شود",
+            'adm_current_choice' => 'انتخاب فعلی : {value}',
+            'adm_invalid_number' => '❌ فقط یک عدد صحیح (صفر یا بیشتر) ارسال کنید.',
+            'adm_both_unchanged' => '⚠️ حجم و انقضا نمی‌توانند هم‌زمان «بدون تغییر» باشند؛ حداقل یکی باید تغییر کند.',
+            'adm_product_missing' => '⚠️ محصول انتخاب‌شده دیگر برای این پنل در دسترس نیست.',
+            'adm_incomplete' => '⚠️ انتخاب‌های تمدید کامل نیست.',
+            'adm_method_prompt' => '⚙️ روش تمدید را برای همین عملیات انتخاب کنید (تنظیم روش تمدید پنل تغییر نمی‌کند):',
+            'adm_method_override_note' => 'ℹ️ گزینه «بدون تغییر» همان بُعد (حجم یا زمان) را در روش انتخابی بازنویسی می‌کند و مقدار فعلی آن بدون تغییر می‌ماند.',
+            'adm_method_required' => 'ابتدا یک روش تمدید انتخاب کنید.',
+            'adm_opt_prompt' => '🔔 مشخص کنید مشتری از تمدید مطلع شود یا نه (تمدید همیشه فوری اجرا می‌شود):',
+            'adm_preview_title' => '🔎 پیش‌نمایش تمدید توسط مدیر',
+            'adm_preview_package' => '🛍 بسته : {value}',
+            'adm_preview_method' => '⚙️ روش تمدید : ✅ {label}',
+            'adm_preview_effective' => '↳ روش اعمال‌شده با احتساب «بدون تغییر» : {label}',
+            'adm_preview_exec_now' => '🚦 اجرا : فوری',
+            'adm_preview_free' => '💰 هزینه : تمدید رایگان توسط مدیر؛ مبلغی از کیف پول یا حساب مشتری کسر نمی‌شود',
+            'adm_preview_notify_on' => '🔔 اطلاع‌رسانی به مشتری : بله',
+            'adm_preview_notify_off' => '🔕 اطلاع‌رسانی به مشتری : خیر',
+            'adm_preview_current' => '📍 وضعیت فعلی سرویس',
+            'adm_preview_pending_current' => '⏳ مدت پس از اولین اتصال : {value}',
+            'adm_preview_expected' => '📍 وضعیت پس از اجرا',
+            'adm_preview_new_used' => '📉 مصرف پس از اجرا : {value}',
+            'adm_preview_unchanged' => '🔒 بدون تغییر : {value}',
+            'adm_unchanged_traffic' => 'حجم کل و مصرف',
+            'adm_unchanged_time' => 'تاریخ انقضا',
+            'adm_none' => 'هیچ‌کدام',
+            'adm_revise_hint' => 'یک مرحله به عقب بازگردید و انتخاب‌ها را اصلاح کنید؛ چیزی اعمال نشده است.',
+            'adm_state_changed' => '⚠️ وضعیت سرویس از زمان پیش‌نمایش تغییر کرده است؛ پیش‌نمایش جدید را بررسی و دوباره تایید کنید. چیزی اعمال نشد.',
+            'adm_already_running' => 'این عملیات قبلاً تایید شده و در حال اجرا یا انجام‌شده است.',
+            'adm_cancelled' => '❌ تمدید لغو شد و هیچ تغییری اعمال نشد.',
+            'adm_error_start' => '❌ تمدید با خطا مواجه گردید؛ مراحل تمدید را مجددا انجام دهید.',
+            'adm_error_manual_panel' => '⚠️ این پنل از نوع فروش دستی یا انبار ملی است و تمدید حجم/زمان با روش‌های این فرایند برای آن پشتیبانی نمی‌شود.',
+            'adm_error_status' => '⚠️ وضعیت فعلی سفارش ({status}) اجازه تمدید نمی‌دهد.',
+            'adm_failed_generic' => '❌ خطایی در تمدید سرویس رخ داد و چیزی اعمال‌شده تایید نشد؛ لاگ‌ها را بررسی کنید.',
+            'adm_failed_stock' => '❌ موجودی انبار فروش دستی برای این محصول تمام شده است.',
+            'adm_admin_done' => '✅ تمدید سرویس انجام و در پنل تایید شد.',
+            'adm_notified_yes' => '🔔 پیام اطلاع‌رسانی برای مشتری ارسال شد.',
+            'adm_notified_no' => '🔕 به انتخاب شما مشتری مطلع نشد.',
+            'adm_finalize_pending' => '⏳ ثبت نهایی در فاکتور و تاریخچه به‌صورت خودکار تکمیل می‌شود؛ تمدید در پنل دوباره ارسال نخواهد شد.',
+            'adm_notified_later' => '🔔 پیام اطلاع‌رسانی پس از ثبت نهایی برای مشتری ارسال می‌شود.',
+            'adm_notified_failed' => '⚠️ ارسال پیام به مشتری ممکن نشد (مثلاً ربات را مسدود کرده است) و دیگر تلاش نمی‌شود؛ تمدید و ثبت فاکتور تکمیل شده است.',
+            'adm_notified_retrying' => '⏳ ارسال پیام به مشتری فعلاً انجام نشد و به‌صورت خودکار و محدود دوباره تلاش می‌شود؛ تمدید و ثبت فاکتور تکمیل شده است. ممکن است در موارد نادر پیام تکراری برسد.',
+            'adm_customer_done' => '✅ سرویس {username} توسط مدیریت تمدید شد.',
+            'adm_customer_activated' => '✅ رزرو تمدید سرویس {username} فعال شد و سرویس شما طبق رزرو تمدید گردید.',
+            'adm_report_done' => '⭕️ ادمین سرویس کاربر را تمدید کرد.',
             'unlimited' => 'نامحدود',
             'days_unit' => 'روز',
             'gb_unit' => 'گیگ',
@@ -1494,7 +1568,46 @@ if (!function_exists('rxRenewalPolicies')) {
             'carry_traffic_reset_time' => ['traffic' => 'carry', 'time' => 'reset'],
             'traffic_only' => ['traffic' => 'carry', 'time' => 'keep'],
             'time_only' => ['traffic' => 'keep', 'time' => 'append'],
+            'reset_traffic_keep_time' => ['traffic' => 'reset', 'time' => 'keep'],
+            'keep_traffic_reset_time' => ['traffic' => 'keep', 'time' => 'reset'],
         ];
+    }
+}
+
+if (!function_exists('rxRenewalAdminBasePolicies')) {
+    function rxRenewalAdminBasePolicies(): array
+    {
+        return ['carry_all', 'reset_all', 'reset_traffic_append_time', 'carry_traffic_reset_time'];
+    }
+}
+
+if (!function_exists('rxRenewalAdminPolicy')) {
+    function rxRenewalAdminPolicy(string $basePolicy, bool $keepTraffic, bool $keepTime): ?string
+    {
+        $policies = rxRenewalPolicies();
+        if (!in_array($basePolicy, rxRenewalAdminBasePolicies(), true) || !isset($policies[$basePolicy]) || ($keepTraffic && $keepTime)) {
+            return null;
+        }
+        $traffic = $keepTraffic ? 'keep' : $policies[$basePolicy]['traffic'];
+        $time = $keepTime ? 'keep' : $policies[$basePolicy]['time'];
+        foreach ($policies as $key => $modes) {
+            if ($modes['traffic'] === $traffic && $modes['time'] === $time) {
+                return $key;
+            }
+        }
+        return null;
+    }
+}
+
+if (!function_exists('rxRenewalAdminMethodLabel')) {
+    function rxRenewalAdminMethodLabel(string $basePolicy): ?string
+    {
+        foreach (rxRenewalModes() as $label => $mode) {
+            if (empty($mode['queued']) && ($mode['key'] ?? '') === $basePolicy) {
+                return (string) $label;
+            }
+        }
+        return null;
     }
 }
 

@@ -2580,6 +2580,7 @@ $iduser  در ربات  رفع مسدود گردید
     nm_adminInstantReply($from_id, $textbotlang['Admin']['order']['vieworderusername'], $backadmin, 'HTML');
     step('GetusernameconfigAndOrdedrs', $from_id);
 } elseif ($user['step'] == "GetusernameconfigAndOrdedrs" || strpos($text, "/config ") !== false || preg_match('/manageinvoice_(\w+)/', $datain, $datagetr)) {
+    rxArDraftResetIfAny($from_id, $user);
     if ($user['step'] == "GetusernameconfigAndOrdedrs") {
         if (!isset($update['message']) && empty($text)) { return; }
         $usernameconfig = $text;

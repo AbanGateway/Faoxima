@@ -60,6 +60,10 @@ foreach ($queuedRows as $row) {
         continue;
     }
     rxReservationMarkNotified((int) $row['id'], $notifyKey);
+    $rxQrFulfillment = rx_pf_decode($row['fulfillment'] ?? null);
+    $rxQrFulfillment = is_array($rxQrFulfillment) ? $rxQrFulfillment : [];
+    $rxQrAdminSource = ($rxQrFulfillment['source'] ?? '') === 'admin';
+    $rxQrNotifyCustomer = !$rxQrAdminSource || ($rxQrFulfillment['notify_customer'] ?? true) !== false;
     $diagnostic = "<blockquote>شناسه رزرو : <code>{$row['id']}</code></blockquote>\n"
         . "<blockquote>نام کاربری سرویس : <code>" . $rxQrEsc($row['username']) . "</code></blockquote>\n"
         . "<blockquote>نام پنل : " . $rxQrEsc($row['name_panel']) . "</blockquote>\n"
@@ -71,10 +75,13 @@ foreach ($queuedRows as $row) {
         $message = faoxima_render_text(faoxima_textbot_get('dyn_queued_renewal_activated_tpl', "با سلام خدمت شما کاربر گرامی 👋\n✅ رزرو اشتراک سرویس {username} فعال شد و حجم و زمان سرویس شما تمدید گردید."), [
             'username' => $row['username'],
         ]);
+        if ($rxQrAdminSource) {
+            $message = rxRenewalText('adm_customer_activated', ['username' => $rxQrEsc($row['username'])]);
+        }
         if (is_array($outcome['before'] ?? null) && is_array($outcome['after'] ?? null)) {
             $message .= "\n\n" . rxRenewalResultText($outcome['before'], $outcome['after']);
         }
-        if ((string) ($row['id_user'] ?? '') !== '') {
+        if ($rxQrNotifyCustomer && (string) ($row['id_user'] ?? '') !== '') {
             sendmessage($row['id_user'], $message, null, 'HTML', $row['bottype']);
         }
         $after = is_array($outcome['after'] ?? null) ? $outcome['after'] : [];
@@ -85,7 +92,7 @@ foreach ($queuedRows as $row) {
     }
 
     if ($status === 'failed') {
-        if ((string) ($row['id_user'] ?? '') !== '') {
+        if ($rxQrNotifyCustomer && (string) ($row['id_user'] ?? '') !== '') {
             sendmessage($row['id_user'], rxRenewalText('reservation_failed_user_tpl', ['username' => $row['username']]), null, 'HTML', $row['bottype']);
         }
         $rxQrReport("❌ خطای دائمی فعال‌سازی رزرو اشتراک (نیازمند بررسی دستی)\n\n" . $diagnostic . "\n<blockquote>دلیل : " . $rxQrEsc($outcome['reason'] ?? '') . "</blockquote>");
@@ -106,7 +113,7 @@ if (!(function_exists('rx_cron_time_up') && rx_cron_time_up()) && (int) $w === 0
         $outcome = (string) ($result['outcome'] ?? '');
         if ($outcome === 'verified') {
             $invoice = !empty($op['id_invoice']) ? select("invoice", "*", "id_invoice", $op['id_invoice'], "select") : null;
-            if (is_array($invoice) && (string) ($invoice['id_user'] ?? '') !== '') {
+            if (is_array($invoice) && (string) ($invoice['id_user'] ?? '') !== '' && (string) ($op['source'] ?? '') !== 'admin') {
                 sendmessage($invoice['id_user'], rxRenewalText('reconciled_user_tpl', ['username' => $rxQrEsc($op['username'] ?? '')]), null, 'HTML', $invoice['bottype'] ?? null);
             }
             $rxQrReport("✅ تمدید نامشخص پس از بررسی خودکار تأیید شد\n\n<blockquote>شناسه عملیات : <code>" . $rxQrEsc($op['op_id'] ?? '') . "</code></blockquote>\n<blockquote>نام کاربری سرویس : <code>" . $rxQrEsc($op['username'] ?? '') . "</code></blockquote>\n<blockquote>نام پنل : " . $rxQrEsc($op['name_panel'] ?? '') . "</blockquote>");

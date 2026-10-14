@@ -2455,6 +2455,10 @@ class ManagePanel
             $rxPolicy = (string) ($rxSelection['policy'] ?? 'reset_all');
             $rxResetUsage = !empty($rxSelection['reset_usage']) && rxRenewalPolicyAllowsUsageReset($rxPolicy);
         }
+        if (($rxOptions['source'] ?? '') === 'admin' && empty($rxMode['queued']) && isset($rxOptions['policy']) && isset(rxRenewalPolicies()[(string) $rxOptions['policy']])) {
+            $rxPolicy = (string) $rxOptions['policy'];
+            $rxResetUsage = false;
+        }
         if ($panel['type'] == "Manualsale") {
             global $pdo;
             $statement = $pdo->prepare("SELECT * FROM manualsell WHERE codepanel = :code_panel AND status = 'active' AND codeproduct = :code_product ORDER BY RAND() LIMIT 1");
@@ -2781,6 +2785,7 @@ class ManagePanel
                 'policy' => $plan['policy'] ?? null,
                 'before' => $before,
                 'target' => $plan,
+                'finalize' => is_array($opts['finalize'] ?? null) ? $opts['finalize'] : null,
             ))) {
                 $rxLogFail('apply_persist', 'operation_persist_failed', 'none');
                 return array('status' => false, 'code' => 'operation_persist_failed', 'no_mutation' => true, 'operation_id' => $opId, 'msg' => 'renewal operation could not be persisted');
@@ -2833,10 +2838,12 @@ class ManagePanel
             if (!empty($verify['ok'])) {
                 rx_rn_op_update($opId, array('state' => 'verified', 'stage' => 'done', 'result_state' => $verify['after'], 'last_error' => null));
                 $this->rxRenewalLocalSuccess($panel, $username, $idInvoice);
+                $adminFinalize = ($source === 'admin' && function_exists('rxArFinalizeOperation')) ? rxArFinalizeOperation($opId) : null;
                 return array(
                     'status' => true,
                     'data' => $write['data'] ?? null,
                     'operation_id' => $opId,
+                    'admin_finalize' => $adminFinalize,
                     'rx_renewal' => array(
                         'plan' => $plan,
                         'before' => $before,

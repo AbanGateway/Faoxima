@@ -5882,9 +5882,14 @@ elseif ($text == "🫣 مخفی پنل برای کاربر" && $adminrulecheck['
     } else {
         nm_adminInstantReply($from_id, $msg, $ip_keyboard_json, 'HTML');
     }
-} elseif (preg_match('/extendadmin_(\w+)/', $datain, $dataget) || strpos($text, "/extend ") !== false) {
+} elseif (is_string($datain) && strpos($datain, 'rxar:') === 0) {
+    rxArOnCallback($ManagePanel, $from_id, $datain);
+} elseif (preg_match('/^extendadmin_(\w+)/', (string) $datain, $dataget) || strpos((string) $text, "/extend ") === 0) {
+    if (!in_array($from_id, $admin_ids)) {
+        return;
+    }
     if ($text[0] == "/") {
-        $usernameconfig = explode(" ", $text)[1];
+        $usernameconfig = explode(" ", $text)[1] ?? '';
         $id_invoice = select("invoice", "id_invoice", "username", $usernameconfig, 'select');
         if ($id_invoice == false) {
             nm_adminInstantReply($from_id, "❌ کاربر وجو ندارد.", null, 'HTML');
@@ -5894,167 +5899,14 @@ elseif ($text == "🫣 مخفی پنل برای کاربر" && $adminrulecheck['
     } else {
         $id_invoice = $dataget[1];
     }
-    $nameloc = select("invoice", "*", "id_invoice", $id_invoice, "select");
-    if ($nameloc == false) {
-        nm_adminInstantReply($from_id, "❌ تمدید با خطا مواجه گردید مراحل تمدید را مجددا انجام دهید.", null, 'HTML');
+    rxArStart($ManagePanel, $from_id, $id_invoice);
+} elseif ($user['step'] == "rxar_vol" || $user['step'] == "rxar_days") {
+    if (!isset($update['message']) && empty($text)) {
         return;
     }
-    $DataUserOut = $ManagePanel->DataUser($nameloc['Service_location'], $nameloc['username']);
-    if ($DataUserOut['status'] == "Unsuccessful") {
-        nm_adminInstantReply($from_id, $textbotlang['users']['stateus']['error'], null, 'html');
-        return;
-    }
-    update("user", "Processing_value_one", $nameloc['id_invoice'], "id", $from_id);
-    savedata("clear", "id_invoice", $nameloc['id_invoice']);
-    $textcustom = "📌 حجم درخواستی خود را ارسال کنید.";
-    nm_adminInstantReply($from_id, $textcustom, $backuser, 'html');
-    step('gettimecustomvolomforextendadmin', $from_id);
-} elseif ($user['step'] == "gettimecustomvolomforextendadmin") {
-    $userdate = json_decode($user['Processing_value'], true);
-    $nameloc = select("invoice", "*", "id_invoice", $userdate['id_invoice'], "select");
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $nameloc['Service_location'], "select");
-    if (!ctype_digit($text)) {
-        nm_adminInstantReply($from_id, $textbotlang['Admin']['Product']['Invalidvolume'], $backuser, 'HTML');
-        return;
-    }
-    savedata("save", "volume", $text);
-    $textcustom = "⌛️ زمان سرویس خود را انتخاب نمایید ";
-    nm_adminInstantReply($from_id, $textcustom, $backuser, 'html');
-    step('getvolumecustomuserforextendadmin', $from_id);
-} elseif ($user['step'] == "getvolumecustomuserforextendadmin") {
-    $userdate = json_decode($user['Processing_value'], true);
-    $nameloc = select("invoice", "*", "id_invoice", $userdate['id_invoice'], "select");
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $nameloc['Service_location'], "select");
-    if (!ctype_digit($text)) {
-        nm_adminInstantReply($from_id, $textbotlang['Admin']['Product']['Invalidtime'], $backuser, 'HTML');
-        return;
-    }
-    $prodcut['name_product'] = $nameloc['name_product'];
-    $prodcut['note'] = "";
-    $prodcut['price_product'] = 0;
-    $prodcut['Service_time'] = $text;
-    $prodcut['Volume_constraint'] = $userdate['volume'];
-    update("invoice", "name_product", $prodcut['name_product'], "id_invoice", $userdate['id_invoice']);
-    update("invoice", "price_product", $prodcut['price_product'], "id_invoice", $userdate['id_invoice']);
-    update("invoice", "Volume", $prodcut['Volume_constraint'], "id_invoice", $userdate['id_invoice']);
-    update("invoice", "Service_time", $prodcut['Service_time'], "id_invoice", $userdate['id_invoice']);
-    step("home", $from_id);
-    $keyboardextend = json_encode([
-        'inline_keyboard' => [
-            [
-                ['text' => $textbotlang['users']['extend']['confirm'], 'callback_data' => "confirmserivceadmin-" . $nameloc['id_invoice']],
-            ],
-            [
-                ['text' => "🏠 بازگشت به منوی اصلی", 'callback_data' => "backuser"]
-            ]
-        ]
-    ]);
-    $textextend = "📜 فاکتور تمدید شما برای نام کاربری {$nameloc['username']} ایجاد شد.
-
-🛍 نام محصول :{$prodcut['name_product']}
-⏱ مدت زمان تمدید :{$prodcut['Service_time']} روز
-🔋 حجم تمدید :{$prodcut['Volume_constraint']} گیگ
-✍️ توضیحات : {$prodcut['note']}
-✅ برای تایید و تمدید سرویس روی دکمه زیر کلیک کنید";
-    if ($user['step'] == "getvolumecustomuserforextendadmin") {
-        nm_adminInstantReply($from_id, $textextend, $keyboardextend, 'HTML');
-    } else {
-        Editmessagetext($from_id, $message_id, $textextend, $keyboardextend);
-    }
-} elseif (preg_match('/^confirmserivceadmin-(.*)/', $datain, $dataget)) {
-    Editmessagetext($from_id, $message_id, $text_inline, json_encode(['inline_keyboard' => []]));
-    $id_invoice = $dataget[1];
-    $nameloc = select("invoice", "*", "id_invoice", $id_invoice, "select");
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $nameloc['Service_location'], "select");
-    $prodcut['code_product'] = "custom_volume";
-    $prodcut['name_product'] = $nameloc['name_product'];
-    $prodcut['price_product'] = 0;
-    $prodcut['Service_time'] = $nameloc['Service_time'];
-    $prodcut['Volume_constraint'] = $nameloc['Volume'];
-    if ($prodcut == false || !in_array($nameloc['Status'], ['active', 'end_of_time', 'end_of_volume', 'sendedwarn', 'send_on_hold'])) {
-        nm_adminInstantReply($from_id, "❌ تمدید با خطا مواجه گردید مراحل تمدید را مجددا انجام دهید.", null, 'HTML');
-        return;
-    }
-    deletemessage($from_id, $message_id);
-    $rxAdminRef = 'admin:' . $from_id . ':' . bin2hex(random_bytes(4));
-    $extend = $ManagePanel->extend($marzban_list_get['Methodextend'], $prodcut['Volume_constraint'], $prodcut['Service_time'], $nameloc['username'], $prodcut['code_product'], $marzban_list_get['code_panel'], null, [
-        'source' => 'admin',
-        'ref' => $rxAdminRef,
-        'id_user' => $nameloc['id_user'],
-        'price' => 0,
-        'reservation' => ['payment_ref' => $rxAdminRef],
-    ]);
-    $rxAdminPending = rxRenewalIsPending($extend);
-    if ($rxAdminPending) {
-        nm_adminInstantReply($from_id, rxRenewalText('pending_verification') . "\n\n🧾 " . (string) ($extend['operation_id'] ?? ''), null, 'HTML');
-        return;
-    }
-    if ($extend['status'] == false) {
-        $extend['msg'] = rx_panel_error_text($extend['msg'] ?? null, $extend['detail'] ?? null);
-        $textreports = "
-        خطای تمدید سرویس
-<blockquote>نام پنل : {$marzban_list_get['name_panel']}</blockquote>
-<blockquote>نام کاربری سرویس : {$nameloc['username']}</blockquote>
-<blockquote>کد خطا : " . htmlspecialchars((string) ($extend['code'] ?? ''), ENT_QUOTES, 'UTF-8') . "</blockquote>
-<blockquote>دلیل خطا : {$extend['msg']}</blockquote>";
-        $rxAdminExtendMsg = rxRenewalFailureText($extend, "❌خطایی در تمدید سرویس رخ داده با پشتیبانی در ارتباط باشید");
-        if (($extend['code'] ?? '') === 'manual_stock_empty') {
-            $rxAdminExtendMsg = "❌ موجودی انبار فروش دستی برای این محصول تمام شده است.";
-        } elseif (($extend['code'] ?? '') === 'queued_renewal_exists') {
-            $rxAdminExtendMsg = "❌ یک رزرو اشتراک برای این سرویس در انتظار فعال‌سازی است.";
-        }
-        nm_adminInstantReply($from_id, $rxAdminExtendMsg, null, 'HTML');
-        if (strlen($setting['Channel_Report']) > 0) {
-            telegram('sendmessage', [
-                'chat_id' => $setting['Channel_Report'],
-                'message_thread_id' => $errorreport,
-                'text' => $textreports,
-                'parse_mode' => "HTML"
-            ]);
-        }
-        return;
-    }
-    $stmt = $pdo->prepare("INSERT IGNORE INTO service_other (id_user, username, value, type, time, price, output) VALUES (:id_user, :username, :value, :type, :time, :price, :output)");
-    $dateacc = date('Y/m/d H:i:s');
-    $value = $prodcut['Volume_constraint'] . "_" . $prodcut['Service_time'];
-    $type = "extend_user_by_admin";
-    $stmt->bindParam(':id_user', $from_id, PDO::PARAM_STR);
-    $stmt->bindParam(':username', $nameloc['username'], PDO::PARAM_STR);
-    $stmt->bindParam(':value', $value, PDO::PARAM_STR);
-    $stmt->bindParam(':type', $type, PDO::PARAM_STR);
-    $stmt->bindParam(':time', $dateacc, PDO::PARAM_STR);
-    $stmt->bindParam(':price', $prodcut['price_product'], PDO::PARAM_STR);
-    $output_json = json_encode($extend);
-    $stmt->bindParam(':output', $output_json, PDO::PARAM_STR);
-    $stmt->execute();
-    $rxAdminExtendThanks = $textbotlang['users']['extend']['thanks'];
-    if (!empty($extend['queued'])) {
-        $rxAdminExtendThanks .= "\n\n" . rxRenewalText('reservation_title');
-        if (is_array($extend['reservation'] ?? null)) {
-            $rxAdminExtendThanks .= "\n" . rxRenewalText('reservation_trigger', ['label' => (string) $extend['reservation']['trigger_label']]) . "\n" . rxRenewalText('reservation_policy', ['label' => (string) $extend['reservation']['policy_label']]);
-        }
-    } elseif (($nameloc['Status'] ?? '') !== 'disablebyadmin') {
-        update("invoice", "Status", "active", "id_invoice", $id_invoice);
-        $rxAdminExtendThanks = rxRenewalDecorateSuccess($rxAdminExtendThanks, $extend, (string) $nameloc['username'], (string) ($marzban_list_get['name_panel'] ?? ''));
-    }
-    nm_adminInstantReply($from_id, $rxAdminExtendThanks, null, 'HTML');
-    $text_report = "⭕️ ادمین سرویس کاربر را تمدید کرد.
-
-اطلاعات کاربر :
-
-<blockquote>🪪 آیدی عددی ادمین : <code>$from_id</code></blockquote>
-<blockquote>🪪 آیدی عددی : <code>{$nameloc['id_user']}</code></blockquote>
-<blockquote>🛍 نام محصول :  {$prodcut['name_product']}</blockquote>
-<blockquote>👤 نام کاربری مشتری در پنل  : {$nameloc['username']}</blockquote>
-<blockquote>موقعیت سرویس سرویس کاربر : {$nameloc['Service_location']}</blockquote>";
-    if (strlen($setting['Channel_Report']) > 0) {
-        telegram('sendmessage', [
-            'chat_id' => $setting['Channel_Report'],
-            'message_thread_id' => $otherservice,
-            'text' => $text_report,
-            'parse_mode' => "HTML"
-        ]);
-    }
+    rxArOnText($ManagePanel, $from_id, (string) $text);
+} elseif (is_string($datain) && strpos($datain, 'confirmserivceadmin-') === 0) {
+    rxArAnswer($callback_query_id, rxRenewalText('button_outdated'));
 } elseif (preg_match('/removeresid_(\w+)/', $datain, $dataget)) {
     $idorder = $dataget[1];
     if (function_exists('rxReceiptHardDelete')) {
