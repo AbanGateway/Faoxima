@@ -9,6 +9,7 @@ require_once __DIR__ . '/lib/bulk_delete.php';
 require_once __DIR__ . '/lib/search_filter.php';
 require_once __DIR__ . '/lib/compact_badges.php';
 require_once __DIR__ . '/lib/csrf.php';
+require_once __DIR__ . '/lib/ordering.php';
 require_once __DIR__ . '/../function.php';
 if (!function_exists('xui_fail2ban_status') && is_file(__DIR__ . '/../x-ui_single.php')) {
     require_once __DIR__ . '/../x-ui_single.php';
@@ -79,7 +80,9 @@ $query->bindValue(':offset', $pg['offset'], PDO::PARAM_INT);
 $query->execute();
 $listinvoice = $query->fetchAll();
 
-$query = $pdo->prepare("SELECT * FROM marzban_panel");
+fx_order_ensure_schema($pdo, 'panel');
+fx_order_ensure_schema($pdo, 'category');
+$query = $pdo->prepare("SELECT * FROM marzban_panel ORDER BY (position = 0) ASC, position ASC, id ASC");
 $query->execute();
 $listpanel = $query->fetchAll();
 
@@ -88,7 +91,7 @@ foreach ($listpanel as $panelRow) {
     $panelTypeMap[$panelRow['name_panel']] = $panelRow['type'];
 }
 
-$catQuery = $pdo->prepare("SELECT remark FROM category ORDER BY id ASC");
+$catQuery = $pdo->prepare("SELECT remark FROM category ORDER BY (position = 0) ASC, position ASC, id ASC");
 $catQuery->execute();
 $listcategory = $catQuery->fetchAll(PDO::FETCH_COLUMN);
 
@@ -185,35 +188,6 @@ alert('محصول از قبل وجود دارد'); window.location.href='product
 }
 
 
-if (isset($_GET['oneproduct'], $_GET['toweproduct']) && $_GET['oneproduct'] !== '' && $_GET['toweproduct'] !== '') {
-    $id1 = intval($_GET['oneproduct']);
-    $id2 = intval($_GET['toweproduct']);
-    if ($id1 > 0 && $id2 > 0 && $id1 !== $id2) {
-        try {
-            $pdo->beginTransaction();
-            $rows = $pdo->query("SELECT id FROM product ORDER BY (position = 0) ASC, position ASC, id ASC")->fetchAll(PDO::FETCH_COLUMN);
-            $setPos = $pdo->prepare("UPDATE product SET position = ? WHERE id = ?");
-            $posOf = [];
-            $pos = 1;
-            foreach ($rows as $rid) {
-                $setPos->execute([$pos, $rid]);
-                $posOf[(int)$rid] = $pos;
-                $pos++;
-            }
-            if (isset($posOf[$id1], $posOf[$id2])) {
-                $setPos->execute([$posOf[$id2], $id1]);
-                $setPos->execute([$posOf[$id1], $id2]);
-            }
-            $pdo->commit();
-        } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
-        }
-    }
-    header("Location: product.php");
-    exit;
-}
-
-
 if (isset($_GET['removeid']) && $_GET['removeid'] !== '') {
     $stmt = $pdo->prepare("DELETE FROM product WHERE id = :id");
     $stmt->bindParam(':id', $_GET['removeid']);
@@ -229,6 +203,7 @@ if (isset($_GET['removeid']) && $_GET['removeid'] !== '') {
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>مدیریت محصولات | ربات فاکسیما</title>
     <link rel="stylesheet" href="css/theme.css?v=flat50">
+    <link rel="stylesheet" href="css/order_modal.css?v=ord1">
 <script src="js/money-input.js?v=fx1" defer></script>
 <script src="js/theme.js?v=flat50" defer>
 
@@ -256,6 +231,9 @@ if (isset($_GET['removeid']) && $_GET['removeid'] !== '') {
                     </button>
                     <button onclick="openModal('modal-move-product')" class="btn btn-soft-purple btn-sm">
                         <?php echo icon('arrow-right-arrow-left', 'svg-icon'); ?> جابجایی ردیف
+                    </button>
+                    <button onclick="openModal('modal-move-panel')" class="btn btn-soft-purple btn-sm">
+                        <?php echo icon('arrow-right-arrow-left', 'svg-icon'); ?> جابجایی پنل‌ها
                     </button>
                 </div>
             </div>
@@ -458,25 +436,8 @@ if (isset($_GET['removeid']) && $_GET['removeid'] !== '') {
 </div>
 
 
-<div id="modal-move-product" class="modal-overlay">
-    <div class="modal-box">
-        <div class="modal-head">
-            <span class="modal-head__title">جابجایی ردیف محصولات</span>
-            <button class="modal-close" onclick="closeModal('modal-move-product')">&times;</button>
-        </div>
-        <form action="product.php" method="GET">
-            <div class="form-group">
-                <label class="form-label">شناسه محصول اول</label>
-                <input type="number" name="oneproduct" class="form-control" required>
-            </div>
-            <div class="form-group">
-                <label class="form-label">شناسه محصول دوم</label>
-                <input type="number" name="toweproduct" class="form-control" required>
-            </div>
-            <button type="submit" class="btn btn-soft-purple btn-block">جابجایی</button>
-        </form>
-    </div>
-</div>
+<?php echo fx_order_modal_html('product', 'modal-move-product'); ?>
+<?php echo fx_order_modal_html('panel', 'modal-move-panel'); ?>
 
 
 <div id="modal-clone-product" class="modal-overlay">
@@ -573,6 +534,7 @@ if (isset($_GET['removeid']) && $_GET['removeid'] !== '') {
 </div>
 <script src="js/bulk-select.js?v=fx2"></script>
 <script src="js/compact-badges.js?v=fx1"></script>
+<script src="js/order_modal.js?v=ord1"></script>
 <script>
   var faoximaPanelTypeMap = <?php echo json_encode($panelTypeMap, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
   function faoximaToggleAll(master, formId) {

@@ -817,6 +817,7 @@ try {
     if (!$table_exists) {
         $result = $connect->query("CREATE TABLE marzban_panel (
         id INT(6) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        position INT(11) NOT NULL DEFAULT 0,
         code_panel varchar(200) NULL,
         name_panel varchar(2000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
         status varchar(500) NULL,
@@ -909,6 +910,12 @@ try {
             'n' => "365",
             'n2' => "365"
         ));
+        $panelPositionColumnExisted = rxTableColumnExists($connect, "marzban_panel", "position");
+        addFieldToTable("marzban_panel", "position", null, "INT(11) NOT NULL DEFAULT 0");
+        if (!$panelPositionColumnExisted) {
+            $connect->query("SET @fx_pos := 0");
+            $connect->query("UPDATE marzban_panel SET position = (@fx_pos := @fx_pos + 1) ORDER BY id ASC");
+        }
         addFieldToTable("marzban_panel", "on_hold_test", "1", "VARCHAR(60)");
         addFieldToTable("marzban_panel", "version_panel", "0", "VARCHAR(60)");
         addFieldToTable("marzban_panel", "proxies", null, "TEXT");
@@ -3152,10 +3159,18 @@ try {
     if (!$table_exists) {
         $result = $connect->query("CREATE TABLE category (
         id INT(6) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        remark varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL)
+        remark varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL,
+        position INT(11) NOT NULL DEFAULT 0)
         ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin");
         if (!$result) {
             error_log("[table.php] table category: " . mysqli_error($connect));
+        }
+    } else {
+        $categoryPositionColumnExisted = rxTableColumnExists($connect, "category", "position");
+        addFieldToTable("category", "position", null, "INT(11) NOT NULL DEFAULT 0");
+        if (!$categoryPositionColumnExisted) {
+            $connect->query("SET @fx_pos := 0");
+            $connect->query("UPDATE category SET position = (@fx_pos := @fx_pos + 1) ORDER BY id ASC");
         }
     }
 } catch (Exception $e) {

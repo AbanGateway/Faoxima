@@ -535,7 +535,7 @@ try {
 
 $listcategory = [];
 try {
-    $catQuery = $pdo->prepare("SELECT remark FROM category ORDER BY id ASC");
+    $catQuery = $pdo->prepare("SELECT remark FROM category ORDER BY (position = 0) ASC, position ASC, id ASC");
     $catQuery->execute();
     $listcategory = $catQuery->fetchAll(PDO::FETCH_COLUMN);
 } catch (\Throwable $e) {  }
@@ -543,7 +543,7 @@ try {
 $listpanel = [];
 $panelNameByCode = [];
 try {
-    $panQuery = $pdo->prepare("SELECT * FROM marzban_panel");
+    $panQuery = $pdo->prepare("SELECT * FROM marzban_panel ORDER BY (position = 0) ASC, position ASC, id ASC");
     $panQuery->execute();
     $listpanel = $panQuery->fetchAll(PDO::FETCH_ASSOC);
     foreach ($listpanel as $p) {

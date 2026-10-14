@@ -1096,7 +1096,7 @@ https://t.me/$usernamebot?start={$user['codeInvitation']}";
         sendmessage($from_id, $datatextbot['dyn_errors_button_disabled'] ?? "❌ این دکمه غیرفعال می باشد", null, 'HTML');
         return;
     }
-    $locationproduct = mysqli_query($connect, "SELECT * FROM marzban_panel  WHERE status = 'active'");
+    $locationproduct = mysqli_query($connect, "SELECT * FROM marzban_panel  WHERE status = 'active' ORDER BY (position = 0) ASC, position ASC, id ASC");
     if (mysqli_num_rows($locationproduct) == 0) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['nullpanel'], null, 'HTML');
         return;
@@ -1243,7 +1243,7 @@ https://t.me/$usernamebot?start={$user['codeInvitation']}";
         step("home", $from_id);
     }
     $rx_loc_kb = ['inline_keyboard' => []];
-    $rx_loc_q = $pdo->prepare("SELECT * FROM marzban_panel WHERE status = 'active'");
+    $rx_loc_q = $pdo->prepare("SELECT * FROM marzban_panel WHERE status = 'active' ORDER BY (position = 0) ASC, position ASC, id ASC");
     $rx_loc_q->execute();
     while ($rx_p = $rx_loc_q->fetch(PDO::FETCH_ASSOC)) {
         $rx_hide = json_decode((string)($rx_p['hide_user'] ?? ''), true);
@@ -2246,7 +2246,7 @@ $textonebuy
         sendmessage($from_id, sprintf($rxMinBulkTpl, $PaySetting), null, 'HTML');
         return;
     }
-    $locationproduct = mysqli_query($connect, "SELECT * FROM marzban_panel");
+    $locationproduct = mysqli_query($connect, "SELECT * FROM marzban_panel ORDER BY (position = 0) ASC, position ASC, id ASC");
     if (mysqli_num_rows($locationproduct) == 0) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['nullpanel'], null, 'HTML');
         return;

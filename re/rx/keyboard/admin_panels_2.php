@@ -253,7 +253,7 @@ function KeyboardCategory($location,$agent,$backuser = "backuser"){
             $list_category['inline_keyboard'][] = [['text' => $row['remark'], 'callback_data' => "categorynames_" . $row['id']]];
         }
     } else {
-        $stmt = $pdo->prepare("SELECT * FROM category");
+        $stmt = $pdo->prepare("SELECT * FROM category ORDER BY (position = 0) ASC, position ASC, id ASC");
         $stmt->execute();
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $stmts = $pdo->prepare("SELECT * FROM product WHERE (FIND_IN_SET(:location, Location) > 0 OR Location = '/all') AND FIND_IN_SET(:category, category) > 0 AND (FIND_IN_SET(:agent, REPLACE(agent, ' ', '')) > 0 OR agent IN ('all', 'allusers'))");
@@ -376,7 +376,7 @@ $keyboardchangelimit = json_encode([
 ]);
 function KeyboardCategoryadmin(){
     global $pdo, $textbotlang, $setting;
-    $stmt = $pdo->prepare("SELECT * FROM category");
+    $stmt = $pdo->prepare("SELECT * FROM category ORDER BY (position = 0) ASC, position ASC, id ASC");
     $stmt->execute();
     $list_category = [
         'keyboard' => [],

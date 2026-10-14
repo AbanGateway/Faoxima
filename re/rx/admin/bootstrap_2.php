@@ -2810,7 +2810,7 @@ elseif ($datain == "systemsms") {
     }
     savedata("save", "agent", $type);
     if ($userdata['typeusermessage'] == "customer") {
-        $stmt = $pdo->prepare("SELECT * FROM marzban_panel WHERE agent = :agent OR agent = 'all'");
+        $stmt = $pdo->prepare("SELECT * FROM marzban_panel WHERE agent = :agent OR agent = 'all' ORDER BY (position = 0) ASC, position ASC, id ASC");
         $stmt->bindParam(':agent', $type);
         $stmt->execute();
         $list_panel = ['inline_keyboard' => []];

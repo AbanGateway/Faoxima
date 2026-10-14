@@ -21,7 +21,7 @@ $infomesssage  = "";
 $id_product    = htmlspecialchars($_GET['id'], ENT_QUOTES, 'UTF-8');
 $product       = select("product", "*", "id", $id_product, "select");
 
-$panelQuery = $pdo->prepare("SELECT name_panel, type FROM marzban_panel ORDER BY id ASC");
+$panelQuery = $pdo->prepare("SELECT name_panel, type FROM marzban_panel ORDER BY (position = 0) ASC, position ASC, id ASC");
 $panelQuery->execute();
 $listpanel = $panelQuery->fetchAll(PDO::FETCH_ASSOC);
 
@@ -30,7 +30,7 @@ foreach ($listpanel as $panelRow) {
     $panelTypeMap[$panelRow['name_panel']] = $panelRow['type'];
 }
 
-$catQuery = $pdo->prepare("SELECT remark FROM category ORDER BY id ASC");
+$catQuery = $pdo->prepare("SELECT remark FROM category ORDER BY (position = 0) ASC, position ASC, id ASC");
 $catQuery->execute();
 $listcategory = $catQuery->fetchAll(PDO::FETCH_COLUMN);
 
