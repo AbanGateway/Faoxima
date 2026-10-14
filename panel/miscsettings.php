@@ -77,6 +77,7 @@ function faoxima_misc_enabled($value): bool
     <title>تنظیمات متفرقه | پنل فاکسیما</title>
     <link rel="stylesheet" href="css/theme.css?v=flat50">
     <link rel="stylesheet" href="css/admin-extra.css?v=flat34">
+    <link rel="stylesheet" href="css/logviewer.css?v=lv1">
     <script src="js/theme.js?v=flat50" defer></script>
 </head>
 <body>
@@ -135,6 +136,14 @@ function faoxima_misc_enabled($value): bool
                     </button>
                 </div>
             </form>
+            <a class="lv-entry" href="logviewer.php">
+                <span class="lv-entry__icon"><?php echo icon('circle-exclamation', 'svg-icon svg-lg'); ?></span>
+                <span class="lv-entry__text">
+                    <strong>مشاهده ارور‌ها</strong>
+                    <small>بررسی خطاها و لاگ‌های برنامه، جستجو، دانلود و حذف فایل‌های لاگ بدون ورود به هاست</small>
+                </span>
+                <span class="lv-entry__go"><?php echo icon('chevron-left', 'svg-icon svg-md'); ?></span>
+            </a>
         </div>
     </section>
 </section>
