@@ -102,7 +102,6 @@ class CurlRequest {
     private $authToken = null;
     private $api_key = null;
     private $cookie = null;
-    public static $lastTransfer = null;
     public function __construct($url) {
         $this->url = $url;
     }
@@ -138,22 +137,6 @@ class CurlRequest {
         }
 
         return $headers;
-    }
-
-    private static function captureTransfer($ch, $curlErrno, $attempt) {
-        $info = curl_getinfo($ch);
-        $info = is_array($info) ? $info : [];
-        return [
-            'http_status' => (int) ($info['http_code'] ?? 0),
-            'content_type' => isset($info['content_type']) ? (string) $info['content_type'] : null,
-            'size_download' => isset($info['size_download']) ? (int) $info['size_download'] : null,
-            'redirect_count' => isset($info['redirect_count']) ? (int) $info['redirect_count'] : null,
-            'redirect_target_present' => !empty($info['redirect_url']),
-            'curl_errno' => (int) $curlErrno,
-            'curl_error' => $curlErrno ? preg_replace('#https?://\S+#i', '[url]', (string) curl_error($ch)) : null,
-            'total_time_ms' => isset($info['total_time']) ? (int) round($info['total_time'] * 1000) : null,
-            'attempt' => (int) $attempt,
-        ];
     }
 
     private function execute($method, $data = null) {
@@ -210,7 +193,6 @@ class CurlRequest {
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $curlErrno = curl_errno($ch);
-        self::$lastTransfer = self::captureTransfer($ch, $curlErrno, $attempt);
         if ($curlErrno) {
             $lastError = curl_error($ch);
             curl_close($ch);

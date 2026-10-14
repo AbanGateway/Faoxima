@@ -446,26 +446,9 @@ class ManagePanel
             $subId = bin2hex(random_bytes(8));
             if (isset($Get_Data_Product['inbounds']) and $Get_Data_Product['inbounds'] != null) {
                 $inbounds = $Get_Data_Product['inbounds'];
-                $xcdInboundSource = 'product.inbounds';
             } else {
                 $inbounds = $Get_Data_Panel['inboundid'];
-                $xcdInboundSource = 'panel.inboundid';
             }
-            xcd_begin('service_create', $Get_Data_Panel, null, $usernameC);
-            xcd_register_subscription_secret($subId);
-            xcd_register_secret($subId);
-            $xcdConfiguredIds = xui_parse_inbound_ids($inbounds);
-            xcd_set_ids('configured', $xcdConfiguredIds);
-            xcd_count('configured_inbound_count', count($xcdConfiguredIds), 'configuration');
-            xcd_event('creation.inbound_selection', array(
-                'product_inbounds' => xcd_shape($Get_Data_Product['inbounds'] ?? null),
-                'panel_inboundid' => xcd_shape($Get_Data_Panel['inboundid'] ?? null),
-                'selected_source' => $xcdInboundSource,
-                'selected_input' => xcd_shape($inbounds),
-                'final_parsed_inbound_ids' => $xcdConfiguredIds,
-                'final_parsed_inbound_count' => count($xcdConfiguredIds),
-                'product_name' => isset($Get_Data_Product['name_product']) ? xcd_sanitize_text($Get_Data_Product['name_product'], 80) : null,
-            ));
             $productIpLimit = isset($Data_Config['ip_limit'])
                 ? intval($Data_Config['ip_limit'])
                 : (isset($Get_Data_Product['ip_limit']) ? intval($Get_Data_Product['ip_limit']) : 0);
@@ -489,8 +472,8 @@ class ManagePanel
                     $Output['status'] = 'Unsuccessful';
                     $Output['msg'] = $data_Output['msg'];
                 } else {
-                    if ($xcdInboundSource === 'panel.inboundid') {
-                        xsync_record_creation($Get_Data_Panel['name_panel'], $usernameC, $xcdConfiguredIds);
+                    if (!(isset($Get_Data_Product['inbounds']) and $Get_Data_Product['inbounds'] != null)) {
+                        xsync_record_creation($Get_Data_Panel['name_panel'], $usernameC, xui_parse_inbound_ids($inbounds));
                     }
                     $subscriptionUrl = rtrim($Get_Data_Panel['linksubx'], '/') . "/{$subId}";
                     $singleConfig = get_single_link_after_create(
@@ -512,19 +495,6 @@ class ManagePanel
                                 $links_user[] = $linkItem;
                             }
                         }
-                    }
-                    if (xcd_active()) {
-                        xcd_count('subscription_link_count', is_array($subscriptionLinks) ? count($subscriptionLinks) : null, 'subscription_retrieval');
-                        xcd_count('returned_link_count', count($links_user), 'bot_processing');
-                        xcd_event('creation.links_assembled', array(
-                            'single_config_type' => is_array($singleConfig) ? ($singleConfig['type'] ?? null) : null,
-                            'subscription_link_count' => is_array($subscriptionLinks) ? count($subscriptionLinks) : null,
-                            'assembled_link_count' => count($links_user),
-                            'assembled_entry_types' => xcd_entry_types($links_user),
-                            'placeholder_used' => empty($links_user),
-                        ));
-                        xcd_probe_token($Get_Data_Panel, $usernameC);
-                        xcd_finish('service_create_completed');
                     }
                     if (empty($links_user)) {
                         $links_user[] = 'در دسترس نیست';
@@ -1129,38 +1099,13 @@ class ManagePanel
                 'service_ids' => $serviceIds
             );
         } elseif ($Get_Data_Panel['type'] == "x-ui_single") {
-            xcd_context_for_panel($Get_Data_Panel);
-            xcd_register_secret($username);
-            xcd_event('datauser.enter', array(
-                'api_mode' => xui_panel_uses_token($Get_Data_Panel) ? 'token' : 'legacy',
-                'client_traffic_endpoint' => xui_panel_uses_token($Get_Data_Panel) ? '/panel/api/clients/traffic/{client}' : '/panel/api/inbounds/getClientTraffics/{client}',
-                'subvip_enabled' => $inoice !== false,
-            ));
-            xcd_clear_transfer();
-            $xcdTrafficStartedAt = microtime(true);
             $user_data = get_clinets($username, $Get_Data_Panel['name_panel']);
-            if (xcd_active()) {
-                $xcdTrafficDecoded = is_array($user_data) && is_string($user_data['body'] ?? null) ? json_decode($user_data['body'], true) : null;
-                $xcdTrafficObj = is_array($xcdTrafficDecoded) ? ($xcdTrafficDecoded['obj'] ?? null) : null;
-                xcd_event('client.traffic', array(
-                    'duration_ms' => (int) round((microtime(true) - $xcdTrafficStartedAt) * 1000),
-                    'http_status' => is_array($user_data) ? ($user_data['status'] ?? null) : null,
-                    'wrapper_error' => !empty($user_data['error']) ? xcd_sanitize_text($user_data['error'], 160) : null,
-                    'json_valid' => is_array($xcdTrafficDecoded),
-                    'success_flag' => is_array($xcdTrafficDecoded) ? ($xcdTrafficDecoded['success'] ?? null) : null,
-                    'obj_type' => $xcdTrafficObj === null ? 'null' : gettype($xcdTrafficObj),
-                    'obj_keys' => is_array($xcdTrafficObj) ? array_slice(array_map('strval', array_keys($xcdTrafficObj)), 0, 40) : null,
-                    'traffic_inbound_id' => (is_array($xcdTrafficObj) && isset($xcdTrafficObj['inboundId'])) ? (int) $xcdTrafficObj['inboundId'] : null,
-                ), (!empty($user_data['error'])) ? 'warn' : 'info');
-            }
             if (!empty($user_data['error'])) {
-                xcd_exit('datauser_panel_error', array('stage' => 'client.traffic'));
                 return array(
                     'status' => 'Unsuccessful',
                     'msg' => $user_data['error']
                 );
             } elseif (!empty($user_data['status']) && $user_data['status'] != 200) {
-                xcd_exit('datauser_non_200_status', array('stage' => 'client.traffic', 'http_status' => $user_data['status']));
                 return array(
                     'status' => 'Unsuccessful',
                     'msg' => json_encode($user_data)
@@ -1169,14 +1114,12 @@ class ManagePanel
             $user_data = json_decode($user_data['body'], true);
 
             if (!is_array($user_data)) {
-                xcd_exit('datauser_object_invalid', array('stage' => 'client.traffic'));
                 return array(
                     'status' => 'Unsuccessful',
                     'msg' => 'object invalid'
                 );
             }
             if (empty($user_data['obj'])) {
-                xcd_exit('datauser_user_not_found', array('stage' => 'client.traffic'));
                 return array(
                     'status' => 'Unsuccessful',
                     'msg' => "User not found"
@@ -1205,37 +1148,7 @@ class ManagePanel
             }
             $subscriptionUrl = rtrim($Get_Data_Panel['linksubx'], '/') . "/{$user_data['subId']}";
             $linksub = $subscriptionUrl;
-            xcd_register_subscription_secret($subscriptionUrl);
-            xcd_register_secret($user_data['subId'] ?? '');
-            xcd_register_secret($user_data['uuid'] ?? ($user_data['id'] ?? ''));
-            xcd_clear_transfer();
-            $xcdSubStartedAt = microtime(true);
             $links_user_raw = outputlunk($subscriptionUrl);
-            $xcdSubElapsedMs = (int) round((microtime(true) - $xcdSubStartedAt) * 1000);
-            $xcdSubFetchFailed = !is_string($links_user_raw);
-            if (xcd_active()) {
-                $xcdSubParse = xcd_analyze_subscription_body($links_user_raw);
-                $xcdSubTransfer = xcd_take_transfer();
-                xcd_event('subscription.fetch', array(
-                    'via' => 'outputlunk',
-                    'url' => xcd_sanitize_url($subscriptionUrl),
-                    'linksubx_configured' => trim((string) ($Get_Data_Panel['linksubx'] ?? '')) !== '',
-                    'duration_ms' => $xcdSubElapsedMs,
-                    'returned_null' => $xcdSubFetchFailed,
-                    'transfer' => $xcdSubTransfer,
-                    'http_status' => $xcdSubTransfer['http_status'] ?? null,
-                    'follows_redirects' => true,
-                    'response_bytes' => is_string($links_user_raw) ? strlen($links_user_raw) : null,
-                ), $xcdSubFetchFailed ? 'warn' : 'info');
-                xcd_event('subscription.parse', $xcdSubParse, $xcdSubFetchFailed ? 'warn' : 'info');
-                xcd_count('subscription_link_count', $xcdSubFetchFailed ? null : ($xcdSubParse['valid_link_count'] ?? null), 'subscription_retrieval');
-                xcd_set_link_fps('sub', $xcdSubFetchFailed ? null : ($xcdSubParse['links']['fingerprints'] ?? array()));
-                if ($xcdSubFetchFailed) {
-                    xcd_reason('subscription_retrieval', 'subscription request returned null (curl errno ' . ($xcdSubTransfer['curl_errno'] ?? 'n/a') . ')');
-                } elseif (($xcdSubParse['valid_link_count'] ?? 0) === 0) {
-                    xcd_reason('subscription_retrieval', 'subscription body held zero parseable links (status ' . ($xcdSubTransfer['http_status'] ?? 'n/a') . ', shape ' . ($xcdSubParse['body_shape'] ?? 'n/a') . ')');
-                }
-            }
             if (!is_string($links_user_raw)) {
                 $links_user_raw = '';
             }
@@ -1251,20 +1164,7 @@ class ManagePanel
             }));
             $singleLink = $links_user[0] ?? null;
             $singleConfigFile = null;
-            $xcdNeedsFallback = !$singleLink || !preg_match('/^(vless|vmess|trojan):\/\//i', $singleLink);
-            if (xcd_active()) {
-                xcd_event('fallback.decision', array(
-                    'parsed_line_count' => count($links_user),
-                    'first_entry' => $singleLink ? xcd_link_info($singleLink) : null,
-                    'first_entry_matches_vless_vmess_trojan' => !$xcdNeedsFallback,
-                    'fallback_activated' => $xcdNeedsFallback,
-                    'reason' => $xcdNeedsFallback ? ($singleLink ? 'first_entry_not_vless_vmess_trojan' : 'no_entries_parsed') : 'first_entry_valid_so_single_link_fallback_and_links_api_skipped_by_existing_flow',
-                    'existing_flow_would_call_links_api' => $xcdNeedsFallback && xui_panel_uses_token($Get_Data_Panel),
-                    'inbound_ids_passed_to_fallback' => xui_parse_inbound_ids($Get_Data_Panel['inboundid']),
-                ));
-                xcd_probe_token($Get_Data_Panel, $username);
-            }
-            if ($xcdNeedsFallback) {
+            if (!$singleLink || !preg_match('/^(vless|vmess|trojan):\/\//i', $singleLink)) {
                 if (is_file(xuisingle_cookie_path())) {
                     @unlink(xuisingle_cookie_path());
                 }
@@ -1281,7 +1181,6 @@ class ManagePanel
                     @unlink(xuisingle_cookie_path());
                 }
                 if (!$singleConfig) {
-                    xcd_exit('datauser_unable_to_build_single_link', array('parsed_line_count_before_fallback' => count($links_user)));
                     return array(
                         'status' => 'Unsuccessful',
                         'msg' => 'Unable to build single link'
@@ -1300,30 +1199,6 @@ class ManagePanel
             if ($inoice != false)
                 $linksub = "https://$domainhosts/sub/" . $inoice['id_invoice'];
             $user_data['lastOnline'] = $user_data['lastOnline'] == 0 ? "offline" : date('Y-m-d H:i:s', $user_data['lastOnline'] / 1000);
-            if (xcd_active()) {
-                xcd_count('returned_link_count', count($links_user), 'bot_processing');
-                $xcdKnownCounts = xcd_state_value('counts');
-                $xcdSubCount = $xcdKnownCounts['subscription_link_count'];
-                $xcdApiCount = $xcdKnownCounts['api_link_count'];
-                $xcdBotNotes = array();
-                if ($xcdSubCount !== null && count($links_user) < $xcdSubCount) {
-                    $xcdBotNotes[] = 'DataUser returned fewer links (' . count($links_user) . ') than subscription parse found (' . $xcdSubCount . ')';
-                }
-                if ($xcdApiCount !== null && count($links_user) < $xcdApiCount) {
-                    $xcdBotNotes[] = 'links API (diagnostic probe) listed ' . $xcdApiCount . ' valid link(s) while DataUser returned ' . count($links_user) . '; fallback ' . ($xcdNeedsFallback ? 'was' : 'was not') . ' activated';
-                }
-                if (!empty($xcdBotNotes)) {
-                    xcd_reason('bot_processing', implode('; ', $xcdBotNotes));
-                }
-                xcd_event('datauser.result', array(
-                    'returned_link_count' => count($links_user),
-                    'entry_types' => xcd_entry_types($links_user),
-                    'links' => xcd_analyze_links($links_user),
-                    'single_config_file_present' => is_array($singleConfigFile),
-                    'fallback_activated' => $xcdNeedsFallback,
-                    'status' => $user_data['enable'],
-                ));
-            }
             $Output = array(
                 'status' => $user_data['enable'],
                 'username' => $user_data['email'],

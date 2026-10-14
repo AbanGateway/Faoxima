@@ -2488,10 +2488,8 @@ $nameconfig";
         sendmessage($from_id, $textbotlang['users']['stateus']['UserNotFound'], null, 'html');
         return;
     }
-    xcd_handler_enter('configpage_', $nameloc);
     $DataUserOut = $ManagePanel->DataUser($nameloc['Service_location'], $nameloc['username']);
     if ($DataUserOut['status'] == "Unsuccessful" || !is_array($DataUserOut['links'] ?? null)) {
-        xcd_exit('configpage_datauser_unsuccessful_or_links_not_array', array('datauser_status' => $DataUserOut['status'] ?? null, 'links_type' => gettype($DataUserOut['links'] ?? null)));
         sendmessage($from_id, $datatextbot['dyn_errors_panel_unavailable_dot'] ?? "❌ پنل در دسترس نیست.", null, 'html');
         return;
     }
@@ -2502,16 +2500,13 @@ $nameconfig";
             $DataUserOut['links'] = $remnaConfigs['links'];
         }
     }
-    xcd_event('handler.links_received', array('links_count' => count($DataUserOut['links']), 'entry_types' => xcd_entry_types($DataUserOut['links']), 'page_requested' => $page));
     if (count($DataUserOut['links']) === 0) {
-        xcd_exit('configpage_links_empty');
         sendmessage($from_id, keyboard_config_unavailable_text($DataUserOut), null, 'html');
         return;
     }
     $configKeyboardRows = 0;
     $configKeyboard = keyboard_config($DataUserOut['links'], $id_invoice, true, $page, $configKeyboardRows);
     if ($configKeyboardRows === 0 || !is_string($configKeyboard)) {
-        xcd_exit('configpage_keyboard_has_no_rows', array('keyboard_rows' => $configKeyboardRows));
         sendmessage($from_id, keyboard_config_unavailable_text($DataUserOut, 'invalid'), null, 'html');
         return;
     }
@@ -2572,10 +2567,8 @@ $nameconfig";
         Editmessagetext($from_id, $message_id, "📌 از لیست زیر یک کانفیگ را انتخاب استفاده نمایید.", keyboard_config($manualConfigs, $nameloc['id_invoice']));
         return;
     }
-    xcd_handler_enter('config_', $nameloc);
     $DataUserOut = $ManagePanel->DataUser($nameloc['Service_location'], $nameloc['username']);
     if ($DataUserOut['status'] == "Unsuccessful") {
-        xcd_exit('config_datauser_unsuccessful', array('datauser_status' => $DataUserOut['status'] ?? null));
         $offlinePanel = select("marzban_panel", "*", "name_panel", $nameloc['Service_location'], "select");
         $offlineKeyboard = json_encode(['inline_keyboard' => [
             [['text' => '♻️ تمدید سرویس', 'callback_data' => 'extend_' . $nameloc['id_invoice']], ['text' => '🛒 خرید سرویس جدید', 'callback_data' => 'buy_service']],
@@ -2585,7 +2578,6 @@ $nameconfig";
         return;
     }
     if (!is_array($DataUserOut['links'])) {
-        xcd_exit('config_links_not_array', array('links_type' => gettype($DataUserOut['links'] ?? null)));
         sendmessage($from_id, $datatextbot['dyn_errors_config_read_error'] ?? "❌  خطا در خواندن اطلاعات کانفیگ با پشتیبانی در ارتباط باشید.", null, 'html');
         return;
     }
@@ -2596,16 +2588,13 @@ $nameconfig";
             $DataUserOut['links'] = $remnaConfigs['links'];
         }
     }
-    xcd_event('handler.links_received', array('links_count' => count($DataUserOut['links']), 'entry_types' => xcd_entry_types($DataUserOut['links'])));
     if (count($DataUserOut['links']) === 0) {
-        xcd_exit('config_links_empty');
         sendmessage($from_id, keyboard_config_unavailable_text($DataUserOut), null, 'html');
         return;
     }
     $configKeyboardRows = 0;
     $configKeyboard = keyboard_config($DataUserOut['links'], $nameloc['id_invoice'], true, 0, $configKeyboardRows);
     if ($configKeyboardRows === 0 || !is_string($configKeyboard)) {
-        xcd_exit('config_keyboard_has_no_rows', array('keyboard_rows' => $configKeyboardRows));
         sendmessage($from_id, keyboard_config_unavailable_text($DataUserOut, 'invalid'), null, 'html');
         return;
     }
@@ -2657,8 +2646,6 @@ $nameconfig";
         sendmessage($from_id, "<code>" . htmlspecialchars($manualConfigs[$dataget[2]], ENT_QUOTES, 'UTF-8') . "</code>", rx_copy_button_keyboard($manualConfigs[$dataget[2]], '📋 کپی کانفیگ'), 'HTML');
         return;
     }
-    xcd_handler_enter('configget_', $nameloc);
-    xcd_event('configget.request', array('selector' => $dataget[2] == "1520" ? 'all' : (string) $dataget[2]));
     $DataUserOut = $ManagePanel->DataUser($nameloc['Service_location'], $nameloc['username']);
     $bakinfos = json_encode([
         'inline_keyboard' => [
@@ -2668,7 +2655,6 @@ $nameconfig";
         ]
     ]);
     if ($DataUserOut['status'] == "Unsuccessful") {
-        xcd_exit('configget_datauser_unsuccessful', array('datauser_status' => $DataUserOut['status'] ?? null));
         sendmessage($from_id, $datatextbot['dyn_errors_panel_unavailable_dot'] ?? "❌ پنل در دسترس نیست.", null, 'html');
         return;
     }
@@ -2680,21 +2666,12 @@ $nameconfig";
         }
     }
     if (!isset($DataUserOut['links']) || !is_array($DataUserOut['links']) || count($DataUserOut['links']) === 0) {
-        xcd_exit('configget_links_missing_or_empty', array('links_type' => gettype($DataUserOut['links'] ?? null)));
         sendmessage($from_id, keyboard_config_unavailable_text($DataUserOut), null, 'html');
         return;
     }
-    xcd_event('handler.links_received', array('links_count' => count($DataUserOut['links']), 'entry_types' => xcd_entry_types($DataUserOut['links'])));
     $rwCgSel = $DataUserOut['links'][$dataget[2]] ?? '';
     $config = "";
     if ($dataget[2] == "1520") {
-        $xcdSkippedFile = (!empty($DataUserOut['single_config_file']) && is_array($DataUserOut['single_config_file'])) ? 1 : 0;
-        xcd_event('configget.send_all_plan', array(
-            'links_available' => count($DataUserOut['links']),
-            'selected_for_sending' => count($DataUserOut['links']) - $xcdSkippedFile,
-            'skipped_first_entry_because_single_config_file_present' => $xcdSkippedFile === 1,
-        ));
-        xcd_count('returned_link_count', count($DataUserOut['links']), 'bot_processing');
         for ($i = 0; $i < count($DataUserOut['links']); ++$i) {
             if ($i === 0 && !empty($DataUserOut['single_config_file']) && is_array($DataUserOut['single_config_file'])) {
                 continue;
@@ -2707,13 +2684,12 @@ $nameconfig";
                     $allWgDest = "{$from_id}-" . bin2hex(random_bytes(3)) . '-' . $allWgName;
                     file_put_contents($allWgDest, $allWgConf['conf']);
                     $allWgLabel = $allWgConf['protocol'] === 'amneziawg' ? 'AmneziaWG' : 'WireGuard';
-                    $xcdSendResp = telegram('sendDocument', [
+                    telegram('sendDocument', [
                         'chat_id' => $from_id,
                         'document' => new CURLFile($allWgDest, 'application/octet-stream', $allWgName),
                         'caption' => "⚙️ کانفیگ شما ({$allWgLabel})",
                         'parse_mode' => 'HTML',
                     ]);
-                    xcd_log_send_result('document', $i, $xcdSendResp);
                     unlink($allWgDest);
                     continue;
                 }
@@ -2721,17 +2697,10 @@ $nameconfig";
             if (preg_match('/^https?:\/\//i', $allConfigItem)) {
                 $allConfigItem = strtok($allConfigItem, '#');
             }
-            $xcdSendResp = sendmessage($from_id, "<code>{$allConfigItem}</code>", rx_copy_button_keyboard($allConfigItem, '📋 کپی کانفیگ'), 'HTML');
-            xcd_log_send_result('message', $i, $xcdSendResp);
+            sendmessage($from_id, "<code>{$allConfigItem}</code>", rx_copy_button_keyboard($allConfigItem, '📋 کپی کانفیگ'), 'HTML');
         }
-        xcd_exit('configget_all_sent');
         return;
     }
-    xcd_event('configget.single_selected', array(
-        'index' => (string) $dataget[2],
-        'index_exists' => isset($DataUserOut['links'][$dataget[2]]),
-        'entry_type' => isset($DataUserOut['links'][$dataget[2]]) ? xcd_entry_type($DataUserOut['links'][$dataget[2]]) : null,
-    ));
     $selectedConfig = (string) $DataUserOut['links'][$dataget[2]];
     if ((int) $dataget[2] === 0 && !empty($DataUserOut['single_config_file']) && is_array($DataUserOut['single_config_file'])) {
         $singleConfigFile = $DataUserOut['single_config_file'];

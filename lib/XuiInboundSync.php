@@ -1,7 +1,5 @@
 <?php
 
-require_once __DIR__ . '/XuiConfigDiagnostic.php';
-
 if (!defined('XSYNC_BATCH_SIZE')) {
     define('XSYNC_BATCH_SIZE', 40);
 }
@@ -29,7 +27,7 @@ if (!defined('XSYNC_SLEEP_ENABLED')) {
 
 function &xsync_ctx()
 {
-    static $ctx = array('run_id' => null, 'panel' => null, 'version' => null, 'deadline' => null);
+    static $ctx = array('deadline' => null);
     return $ctx;
 }
 
@@ -44,54 +42,24 @@ function xsync_pdo()
     return ($GLOBALS['pdo'] ?? null) instanceof PDO ? $GLOBALS['pdo'] : null;
 }
 
-function xsync_log_file()
-{
-    return xcd_log_dir() . DIRECTORY_SEPARATOR . 'xui-inbound-sync-' . date('Y-m-d') . '.jsonl';
-}
-
-function xsync_run_id()
-{
-    $ctx = &xsync_ctx();
-    if ($ctx['run_id'] === null) {
-        try {
-            $ctx['run_id'] = bin2hex(random_bytes(6));
-        } catch (\Throwable $e) {
-            $ctx['run_id'] = substr(md5(uniqid('', true)), 0, 12);
-        }
-    }
-    return $ctx['run_id'];
-}
-
-function xsync_log($event, $data = array(), $level = 'info')
-{
-    $ctx = &xsync_ctx();
-    $now = microtime(true);
-    $record = array(
-        'ts' => gmdate('Y-m-d\TH:i:s', (int) $now) . sprintf('.%03dZ', (int) (($now - floor($now)) * 1000)),
-        'run_id' => xsync_run_id(),
-        'level' => $level,
-        'event' => (string) $event,
-        'panel' => $ctx['panel'],
-        'reference_version' => $ctx['version'],
-        'pid' => function_exists('getmypid') ? getmypid() : null,
-        'data' => $data,
-    );
-    $flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR;
-    $line = json_encode($record, $flags);
-    if (!is_string($line)) {
-        return false;
-    }
-    if (strlen($line) > XCD_MAX_LINE_BYTES) {
-        $record['data'] = array('truncated' => true, 'original_bytes' => strlen($line));
-        $line = json_encode($record, $flags);
-    }
-    return xcd_append($line . "\n", xsync_log_file());
-}
-
 function xsync_reset_run()
 {
     $ctx = &xsync_ctx();
-    $ctx = array('run_id' => null, 'panel' => null, 'version' => null, 'deadline' => null);
+    $ctx = array('deadline' => null);
+}
+
+function xsync_sanitize($text, $max = 240)
+{
+    $text = (string) $text;
+    $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+/', ' ', $text);
+    $text = preg_replace('#https?://[^\s"\'<>]+#i', '[url]', (string) $text);
+    $text = preg_replace('/Bearer\s+\S+/i', 'Bearer [redacted]', (string) $text);
+    $text = preg_replace('/(token|password|secret|cookie|authorization|apikey|api_key)(["\']?\s*[=:]\s*["\']?)[^\s"\',;&]+/i', '$1$2[redacted]', (string) $text);
+    $text = preg_replace('/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i', '[uuid]', (string) $text);
+    $text = preg_replace('/[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(\.[A-Za-z0-9\-]+)+/', '[email]', (string) $text);
+    $text = preg_replace('/[A-Za-z0-9+\/_=\-]{24,}/', '[long-token]', (string) $text);
+    $text = trim((string) $text);
+    return function_exists('mb_substr') ? mb_substr($text, 0, $max, 'UTF-8') : substr($text, 0, $max);
 }
 
 function xsync_ids($ids)
@@ -181,7 +149,7 @@ function xsync_is_enabled($panelName)
         $row = xsync_panel_state($pdo, $panelName);
         return is_array($row) && (int) $row['enabled'] === 1;
     } catch (\Throwable $e) {
-        xcd_report('xsync_is_enabled failed: ' . $e->getMessage());
+        error_log('[xui-inbound-sync] is_enabled failed: ' . $e->getMessage());
         return false;
     }
 }
@@ -193,18 +161,13 @@ function xsync_enable_panel($panelName, $referenceEmail, $referenceIds, $previou
         return false;
     }
     xsync_ensure_tables($pdo);
-    xcd_register_secret($referenceEmail);
-    $ctx = &xsync_ctx();
-    $ctx['panel'] = $panelName;
     $ids = xsync_ids($referenceIds);
     $existing = xsync_panel_state($pdo, $panelName);
     $now = time();
     if (!is_array($existing)) {
-        $baseline = xsync_ids(xcd_parse_ids($previousDefaultRaw));
+        $baseline = xsync_ids(xui_parse_inbound_ids($previousDefaultRaw));
         $stmt = $pdo->prepare('INSERT INTO xui_sync_panel (panel_name, enabled, reference_email, baseline_ids, ref_ids, ref_version, ref_validated_at, last_status, updated_at) VALUES (?, 1, ?, ?, ?, 1, ?, ?, ?)');
         $stmt->execute(array($panelName, $referenceEmail, json_encode($baseline), json_encode($ids), $now, 'enabled', $now));
-        $ctx['version'] = 1;
-        xsync_log('sync.enabled', array('reference_fp' => xcd_fp($referenceEmail, 10), 'baseline_ids' => $baseline, 'reference_ids' => $ids, 'new_installation' => true));
         return true;
     }
     $version = (int) $existing['ref_version'];
@@ -216,8 +179,6 @@ function xsync_enable_panel($panelName, $referenceEmail, $referenceIds, $previou
     }
     $stmt = $pdo->prepare('UPDATE xui_sync_panel SET enabled = 1, reference_email = ?, ref_ids = ?, ref_version = ?, ref_validated_at = ?, pending_empty_at = NULL, last_status = ?, last_error = NULL, updated_at = ? WHERE panel_name = ?');
     $stmt->execute(array($referenceEmail, json_encode($ids), $version, $now, 're-enabled', $now, $panelName));
-    $ctx['version'] = $version;
-    xsync_log('sync.enabled', array('reference_fp' => xcd_fp($referenceEmail, 10), 'reference_ids' => $ids, 'new_installation' => false, 'reference_changed' => $emailChanged, 'version_bumped' => $idsChanged));
     return true;
 }
 
@@ -233,19 +194,14 @@ function xsync_record_creation($panelName, $email, $ids, $invoiceId = null)
         if (!is_array($state) || (int) $state['enabled'] !== 1) {
             return false;
         }
-        xcd_register_secret($email);
-        $ctx = &xsync_ctx();
-        $ctx['panel'] = $panelName;
-        $ctx['version'] = (int) $state['ref_version'];
         $ids = xsync_ids($ids);
         $current = xsync_decode_ids($state['ref_ids']);
         $version = ($ids === $current) ? (int) $state['ref_version'] : 0;
         $stmt = $pdo->prepare("INSERT INTO xui_sync_service (svc_key, panel_name, email, id_invoice, state, managed_ids, synced_version, ownership_source, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?, 'creation_record', ?) ON DUPLICATE KEY UPDATE managed_ids = VALUES(managed_ids), synced_version = VALUES(synced_version), state = 'pending', ownership_source = 'creation_record', review_reason = NULL, updated_at = VALUES(updated_at)");
         $stmt->execute(array(xsync_svc_key($panelName, $email), $panelName, $email, $invoiceId, json_encode($ids), $version, time()));
-        xsync_log('service.creation_recorded', array('service_fp' => xcd_fp($email, 10), 'managed_ids' => $ids, 'synced_version' => $version));
         return true;
     } catch (\Throwable $e) {
-        xcd_report('xsync_record_creation failed: ' . $e->getMessage());
+        error_log('[xui-inbound-sync] record_creation failed: ' . $e->getMessage());
         return false;
     }
 }
@@ -276,7 +232,7 @@ function xsync_fetch_client($panel, $email)
     $kind = xsync_error_kind_from_response($resp);
     if ($kind !== null) {
         $result['kind'] = $kind;
-        $result['msg'] = !empty($resp['error']) ? xcd_sanitize_text($resp['error'], 160) : null;
+        $result['msg'] = !empty($resp['error']) ? xsync_sanitize($resp['error'], 160) : null;
         return $result;
     }
     $body = is_string($resp['body'] ?? null) ? $resp['body'] : null;
@@ -287,7 +243,7 @@ function xsync_fetch_client($panel, $email)
     }
     if (($decoded['success'] ?? null) !== true) {
         $result['kind'] = 'rejected';
-        $result['msg'] = isset($decoded['msg']) ? xcd_sanitize_text($decoded['msg'], 160) : null;
+        $result['msg'] = isset($decoded['msg']) ? xsync_sanitize($decoded['msg'], 160) : null;
         return $result;
     }
     $obj = $decoded['obj'] ?? null;
@@ -367,7 +323,7 @@ function xsync_mutate($panel, $email, $action, $ids)
     return array(
         'status' => is_array($resp) ? (int) ($resp['status'] ?? 0) : 0,
         'success_flag' => is_array($body) ? ($body['success'] ?? null) : null,
-        'msg' => (is_array($body) && isset($body['msg'])) ? xcd_sanitize_text($body['msg'], 240) : ((is_array($resp) && !empty($resp['error'])) ? xcd_sanitize_text($resp['error'], 240) : null),
+        'msg' => (is_array($body) && isset($body['msg'])) ? xsync_sanitize($body['msg'], 240) : ((is_array($resp) && !empty($resp['error'])) ? xsync_sanitize($resp['error'], 240) : null),
         'ms' => (int) round((microtime(true) - $started) * 1000),
     );
 }
@@ -399,15 +355,8 @@ function xsync_fail_service($pdo, $svc, $reason, $extra = array())
         'state' => 'error',
         'attempts' => $attempts,
         'next_attempt_at' => $next,
-        'last_error' => xcd_sanitize_text($reason, 400),
+        'last_error' => xsync_sanitize($reason, 400),
     ));
-    xsync_log('service.failed', array_merge(array(
-        'service_fp' => xcd_fp($svc['email'], 10),
-        'invoice' => $svc['id_invoice'],
-        'reason' => xcd_sanitize_text($reason, 200),
-        'attempts' => $attempts,
-        'next_attempt_in_s' => $next - time(),
-    ), $extra), 'warn');
     return 'failed';
 }
 
@@ -450,13 +399,11 @@ function xsync_classify_service($pdo, $panel, $svc, $desired)
     $panelName = $svc['panel_name'];
     if (strcasecmp($email, $desired['reference_email']) === 0) {
         xsync_update_service($pdo, $svc['svc_key'], array('state' => 'excluded', 'review_reason' => 'reference_client'));
-        xsync_log('service.classified', array('service_fp' => xcd_fp($email, 10), 'invoice' => $svc['id_invoice'], 'result' => 'excluded', 'reason' => 'reference_client'));
         return 'excluded';
     }
     $product = xsync_product_explicit($pdo, $panelName, $svc['product_name'] ?? null);
     if ($product['explicit']) {
         xsync_update_service($pdo, $svc['svc_key'], array('state' => 'excluded', 'review_reason' => 'product_explicit_inbounds'));
-        xsync_log('service.classified', array('service_fp' => xcd_fp($email, 10), 'invoice' => $svc['id_invoice'], 'result' => 'excluded', 'reason' => 'product_explicit_inbounds'));
         return 'excluded';
     }
     $read = xsync_fetch_client_retry($panel, $email);
@@ -466,10 +413,8 @@ function xsync_classify_service($pdo, $panel, $svc, $desired)
     $actual = $read['ids'];
     $baseline = $desired['baseline'];
     $managed = xsync_ids(array_intersect($actual, $baseline));
-    $unowned = array_values(array_diff($actual, $managed));
     $source = ($actual === $baseline && !empty($actual)) ? 'migration_exact_baseline' : 'migration_baseline_overlap';
     xsync_update_service($pdo, $svc['svc_key'], array('state' => 'pending', 'managed_ids' => json_encode($managed), 'ownership_source' => $source, 'review_reason' => null, 'attempts' => 0, 'next_attempt_at' => 0, 'last_error' => null));
-    xsync_log('service.classified', array('service_fp' => xcd_fp($email, 10), 'invoice' => $svc['id_invoice'], 'result' => 'managed', 'ownership_source' => $source, 'actual_ids' => $actual, 'baseline_ids' => $baseline, 'managed_ids' => $managed, 'unowned_ids_preserved' => $unowned, 'product_rows_matched' => $product['rows']));
     return 'managed';
 }
 
@@ -480,7 +425,6 @@ function xsync_reconcile_service($pdo, $panel, $svc, $desired)
     $version = $desired['version'];
     $target = $desired['ids'];
     $managed = xsync_decode_ids($svc['managed_ids']);
-    $svcLog = array('service_fp' => xcd_fp($email, 10), 'invoice' => $svc['id_invoice']);
 
     $read = xsync_fetch_client_retry($panel, $email);
     if (!$read['ok']) {
@@ -489,33 +433,23 @@ function xsync_reconcile_service($pdo, $panel, $svc, $desired)
     $actual = $read['ids'];
     $toAdd = array_values(array_diff($target, $actual));
     $toRemove = array_values(array_intersect(array_diff($managed, $target), $actual));
-    xsync_log('service.plan', array_merge($svcLog, array(
-        'previous_managed_ids' => $managed,
-        'actual_ids' => $actual,
-        'desired_ids' => $target,
-        'to_add' => $toAdd,
-        'to_remove' => $toRemove,
-    )));
 
     $attachedByUs = array();
     $addPending = $toAdd;
     for ($try = 1; !empty($addPending) && $try <= XSYNC_STEP_RETRIES; $try++) {
         $latest = xsync_current_desired($pdo, $panelName);
         if ($latest === null || $latest['version'] !== $version) {
-            xsync_log('service.superseded', array_merge($svcLog, array('phase' => 'attach', 'newer_version' => $latest['version'] ?? null)));
             return 'superseded';
         }
-        $outcome = xsync_mutate($panel, $email, 'attach', $addPending);
+        xsync_mutate($panel, $email, 'attach', $addPending);
         $verify = xsync_fetch_client_retry($panel, $email);
         if (!$verify['ok']) {
-            xsync_log('service.attach', array_merge($svcLog, array('try' => $try, 'requested' => $addPending, 'api' => $outcome, 'verify' => 'read_' . $verify['kind'])), 'warn');
             return xsync_fail_service($pdo, $svc, 'verify_after_attach_' . $verify['kind'], array('requested' => $addPending));
         }
         $actual = $verify['ids'];
         $done = array_values(array_intersect($addPending, $actual));
         $attachedByUs = array_values(array_unique(array_merge($attachedByUs, $done)));
         $addPending = array_values(array_diff($addPending, $actual));
-        xsync_log('service.attach', array_merge($svcLog, array('try' => $try, 'requested' => array_values(array_merge($done, $addPending)), 'api' => $outcome, 'verified_present' => $done, 'remaining' => $addPending, 'actual_after' => $actual)), empty($addPending) ? 'info' : 'warn');
         if (!empty($addPending) && $try < XSYNC_STEP_RETRIES && xsync_time_left()) {
             xsync_pause($try);
         } elseif (!empty($addPending)) {
@@ -525,7 +459,6 @@ function xsync_reconcile_service($pdo, $panel, $svc, $desired)
     $managedNow = xsync_ids(array_intersect(array_merge($managed, $attachedByUs), $actual));
     if (!empty($addPending)) {
         xsync_update_service($pdo, $svc['svc_key'], array('managed_ids' => json_encode($managedNow)));
-        xsync_log('service.removals_deferred', array_merge($svcLog, array('reason' => 'attach_incomplete', 'failed_adds' => $addPending, 'deferred_removals' => $toRemove)), 'warn');
         return xsync_fail_service($pdo, $svc, 'attach_incomplete', array('failed_adds' => $addPending));
     }
     if (!empty($attachedByUs)) {
@@ -534,23 +467,17 @@ function xsync_reconcile_service($pdo, $panel, $svc, $desired)
 
     $latest = xsync_current_desired($pdo, $panelName);
     if ($latest === null || $latest['version'] !== $version) {
-        xsync_log('service.superseded', array_merge($svcLog, array('phase' => 'before_detach', 'newer_version' => $latest['version'] ?? null)));
         return 'superseded';
     }
     $removePending = array_values(array_intersect(array_diff($managedNow, $target), $actual));
-    $removedOk = array();
     for ($try = 1; !empty($removePending) && $try <= XSYNC_STEP_RETRIES; $try++) {
-        $outcome = xsync_mutate($panel, $email, 'detach', $removePending);
+        xsync_mutate($panel, $email, 'detach', $removePending);
         $verify = xsync_fetch_client_retry($panel, $email);
         if (!$verify['ok']) {
-            xsync_log('service.detach', array_merge($svcLog, array('try' => $try, 'requested' => $removePending, 'api' => $outcome, 'verify' => 'read_' . $verify['kind'])), 'warn');
             return xsync_fail_service($pdo, $svc, 'verify_after_detach_' . $verify['kind'], array('requested' => $removePending));
         }
         $actual = $verify['ids'];
-        $gone = array_values(array_diff($removePending, $actual));
-        $removedOk = array_values(array_unique(array_merge($removedOk, $gone)));
         $removePending = array_values(array_intersect($removePending, $actual));
-        xsync_log('service.detach', array_merge($svcLog, array('try' => $try, 'api' => $outcome, 'verified_absent' => $gone, 'remaining' => $removePending, 'actual_after' => $actual)), empty($removePending) ? 'info' : 'warn');
         if (!empty($removePending) && $try < XSYNC_STEP_RETRIES && xsync_time_left()) {
             xsync_pause($try);
         } elseif (!empty($removePending)) {
@@ -575,7 +502,6 @@ function xsync_reconcile_service($pdo, $panel, $svc, $desired)
         'next_attempt_at' => 0,
         'last_error' => null,
     ));
-    xsync_log('service.synced', array_merge($svcLog, array('managed_ids' => $managedFinal, 'final_ids' => $actual, 'added' => $attachedByUs, 'removed' => $removedOk, 'synced_version' => $version)));
     return 'synced';
 }
 
@@ -588,17 +514,14 @@ function xsync_check_reference($pdo, $panel, $state)
     $touch = $pdo->prepare('UPDATE xui_sync_panel SET last_check_at = ?, last_status = ?, last_error = ?, updated_at = ? WHERE panel_name = ?');
     if (!$read['ok']) {
         $touch->execute(array($now, 'reference_unavailable', 'reference_' . $read['kind'], $now, $panelName));
-        xsync_log('reference.unavailable', array('reference_fp' => xcd_fp($email, 10), 'kind' => $read['kind'], 'http_status' => $read['status'], 'message' => $read['msg'], 'action' => 'no_changes_applied'), 'warn');
         return array('changed' => false, 'valid' => false);
     }
     $ids = $read['ids'];
     $snapshot = xsync_decode_ids($state['ref_ids']);
     $version = (int) $state['ref_version'];
-    $ctx = &xsync_ctx();
     if ($ids === $snapshot) {
         $stmt = $pdo->prepare('UPDATE xui_sync_panel SET last_check_at = ?, last_status = ?, last_error = NULL, pending_empty_at = NULL, ref_validated_at = ?, updated_at = ? WHERE panel_name = ?');
         $stmt->execute(array($now, 'reference_unchanged', $now, $now, $panelName));
-        xsync_log('reference.unchanged', array('reference_ids' => $ids));
         return array('changed' => false, 'valid' => true);
     }
     if (empty($ids)) {
@@ -606,19 +529,16 @@ function xsync_check_reference($pdo, $panel, $state)
         if ($pendingSince === 0) {
             $stmt = $pdo->prepare('UPDATE xui_sync_panel SET pending_empty_at = ?, last_check_at = ?, last_status = ?, last_error = NULL, updated_at = ? WHERE panel_name = ?');
             $stmt->execute(array($now, $now, 'empty_reference_awaiting_confirmation', $now, $panelName));
-            xsync_log('reference.empty_first_read', array('previous_ids' => $snapshot, 'action' => 'awaiting_second_read'), 'warn');
             return array('changed' => false, 'valid' => true);
         }
         if (($now - $pendingSince) < XSYNC_EMPTY_CONFIRM_DELAY) {
             $touch->execute(array($now, 'empty_reference_awaiting_confirmation', null, $now, $panelName));
-            xsync_log('reference.empty_confirmation_too_soon', array('waited_s' => $now - $pendingSince, 'required_s' => XSYNC_EMPTY_CONFIRM_DELAY), 'warn');
             return array('changed' => false, 'valid' => true);
         }
     }
     $version++;
     $stmt = $pdo->prepare('UPDATE xui_sync_panel SET ref_ids = ?, ref_version = ?, ref_validated_at = ?, pending_empty_at = NULL, last_check_at = ?, last_status = ?, last_error = NULL, updated_at = ? WHERE panel_name = ?');
     $stmt->execute(array(json_encode($ids), $version, $now, $now, 'reference_changed', $now, $panelName));
-    $ctx['version'] = $version;
     $defaultUpdated = false;
     if (!empty($ids)) {
         $csv = implode(',', $ids);
@@ -630,16 +550,6 @@ function xsync_check_reference($pdo, $panel, $state)
         }
         $defaultUpdated = true;
     }
-    xsync_log('reference.changed', array(
-        'previous_ids' => $snapshot,
-        'new_ids' => $ids,
-        'added' => array_values(array_diff($ids, $snapshot)),
-        'removed' => array_values(array_diff($snapshot, $ids)),
-        'previous_version' => $version - 1,
-        'new_version' => $version,
-        'new_service_default_updated' => $defaultUpdated,
-        'new_service_default_note' => $defaultUpdated ? null : 'empty reference cannot be a creation default; default left unchanged',
-    ), 'warn');
     return array('changed' => true, 'valid' => true);
 }
 
@@ -652,13 +562,9 @@ function xsync_migrate_services($pdo, $panelName, $state)
         $requeuedReview = $stmt->rowCount();
         $mark = $pdo->prepare('UPDATE xui_sync_panel SET migration_rev = 2 WHERE panel_name = ?');
         $mark->execute(array($panelName));
-        xsync_log('migration.review_requeued', array('services' => $requeuedReview));
     }
     $stmt = $pdo->prepare("UPDATE xui_sync_service SET state = 'unclassified', review_reason = NULL, updated_at = ? WHERE panel_name = ? AND state = 'excluded' AND review_reason = 'reference_client' AND LOWER(email) <> LOWER(?)");
     $stmt->execute(array(time(), $panelName, (string) $state['reference_email']));
-    if ($stmt->rowCount() > 0) {
-        xsync_log('migration.former_reference_requeued', array('services' => $stmt->rowCount()));
-    }
     return $requeuedReview;
 }
 
@@ -666,24 +572,18 @@ function xsync_migrate_disabled_panels($pdo)
 {
     $stmt = $pdo->query("SELECT * FROM xui_sync_panel WHERE enabled = 0 AND reference_email IS NOT NULL AND reference_email <> '' AND last_check_at < " . (time() - 600));
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    $ctx = &xsync_ctx();
     foreach (is_array($rows) ? $rows : array() as $row) {
         $panelName = $row['panel_name'];
-        $ctx['panel'] = $panelName;
-        $ctx['version'] = (int) $row['ref_version'];
         $panel = xsync_load_panel($panelName);
         $now = time();
         $touch = $pdo->prepare('UPDATE xui_sync_panel SET last_check_at = ?, last_status = ?, updated_at = ? WHERE panel_name = ?');
         if (!is_array($panel) || ($panel['type'] ?? '') !== 'x-ui_single' || !xui_panel_uses_token($panel)) {
             $touch->execute(array($now, 'disabled_unsupported_panel', $now, $panelName));
-            xsync_log('migration.disabled_panel_skipped', array('reason' => 'panel_missing_or_not_token_mode'), 'warn');
             continue;
         }
-        xcd_register_secret($row['reference_email']);
         $read = xsync_fetch_client_retry($panel, (string) $row['reference_email']);
         if (!$read['ok'] || empty($read['ids'])) {
             $touch->execute(array($now, 'disabled_reference_unvalidated', $now, $panelName));
-            xsync_log('migration.disabled_panel_skipped', array('reason' => $read['ok'] ? 'reference_has_no_inbounds' : 'reference_' . $read['kind'], 'reference_fp' => xcd_fp($row['reference_email'], 10)), 'warn');
             continue;
         }
         xsync_enable_panel($panelName, (string) $row['reference_email'], $read['ids'], '');
@@ -694,8 +594,6 @@ function xsync_migrate_disabled_panels($pdo)
             $upd = $pdo->prepare('UPDATE marzban_panel SET inboundid = ? WHERE name_panel = ?');
             $upd->execute(array($csv, $panelName));
         }
-        $ctx['version'] = (int) xsync_panel_state($pdo, $panelName)['ref_version'];
-        xsync_log('migration.disabled_panel_reenabled', array('reference_ids' => $read['ids'], 'new_service_default_updated' => true));
     }
 }
 
@@ -710,12 +608,8 @@ function xsync_discover($pdo, $panelName, $referenceEmail)
     $insert = $pdo->prepare("INSERT IGNORE INTO xui_sync_service (svc_key, panel_name, email, id_invoice, state, managed_ids, updated_at) VALUES (?, ?, ?, ?, 'unclassified', '[]', ?)");
     $count = 0;
     foreach (is_array($rows) ? $rows : array() as $row) {
-        xcd_register_secret($row['username']);
         $insert->execute(array(xsync_svc_key($panelName, $row['username']), $panelName, $row['username'], $row['id_invoice'], time()));
         $count += $insert->rowCount();
-    }
-    if ($count > 0) {
-        xsync_log('discover.queued', array('services_added' => $count));
     }
     return $count;
 }
@@ -755,10 +649,7 @@ function xsync_load_panel($panelName)
 function xsync_run_panel($panelName)
 {
     $pdo = xsync_pdo();
-    $ctx = &xsync_ctx();
-    $ctx['panel'] = $panelName;
     if (!xsync_lock($pdo, $panelName)) {
-        xsync_log('run.skipped', array('reason' => 'another_run_holds_panel_lock'));
         return array('status' => 'locked');
     }
     $summary = array('status' => 'ok', 'synced' => 0, 'failed' => 0, 'review' => 0, 'managed' => 0, 'excluded' => 0, 'superseded' => 0);
@@ -766,18 +657,13 @@ function xsync_run_panel($panelName)
         $state = xsync_panel_state($pdo, $panelName);
         $panel = xsync_load_panel($panelName);
         if (!is_array($state) || (int) $state['enabled'] !== 1 || !is_array($panel)) {
-            xsync_log('run.skipped', array('reason' => 'not_enabled_or_panel_missing'));
             return array('status' => 'disabled');
         }
-        $ctx['version'] = (int) $state['ref_version'];
         if (($panel['type'] ?? '') !== 'x-ui_single' || !xui_panel_uses_token($panel)) {
             $stmt = $pdo->prepare('UPDATE xui_sync_panel SET last_status = ?, last_check_at = ?, updated_at = ? WHERE panel_name = ?');
             $stmt->execute(array('unsupported_panel_mode', time(), time(), $panelName));
-            xsync_log('run.skipped', array('reason' => 'panel_not_in_token_mode'), 'warn');
             return array('status' => 'unsupported');
         }
-        xcd_register_secret($state['reference_email']);
-        xsync_log('run.start', array('reference_fp' => xcd_fp($state['reference_email'], 10), 'reference_ids' => xsync_decode_ids($state['ref_ids'])));
         xsync_check_reference($pdo, $panel, $state);
         xsync_migrate_services($pdo, $panelName, $state);
         xsync_discover($pdo, $panelName, $state['reference_email']);
@@ -788,15 +674,12 @@ function xsync_run_panel($panelName)
         $batch = $stmt->fetchAll(PDO::FETCH_ASSOC);
         foreach (is_array($batch) ? $batch : array() as $svc) {
             if (!xsync_time_left()) {
-                xsync_log('run.time_budget_reached', array('remaining_in_batch' => true), 'warn');
                 break;
             }
-            xcd_register_secret($svc['email']);
             $desired = xsync_current_desired($pdo, $panelName);
             if ($desired === null) {
                 break;
             }
-            $ctx['version'] = $desired['version'];
             try {
                 if ($svc['state'] === 'unclassified') {
                     $outcome = xsync_classify_service($pdo, $panel, $svc, $desired);
@@ -824,7 +707,6 @@ function xsync_run_panel($panelName)
         }
     } catch (\Throwable $e) {
         $summary['status'] = 'exception';
-        xsync_log('run.exception', array('message' => xcd_sanitize_text($e->getMessage(), 300)), 'error');
     } finally {
         xsync_unlock($pdo, $panelName);
     }
@@ -835,7 +717,6 @@ function xsync_run_panel($panelName)
         $byState[$row['state']] = (int) $row['c'];
     }
     $summary['services_by_state'] = $byState;
-    xsync_log('run.end', $summary);
     return $summary;
 }
 
@@ -852,10 +733,7 @@ function xsync_run_all()
     try {
         xsync_migrate_disabled_panels($pdo);
     } catch (\Throwable $e) {
-        xsync_log('migration.exception', array('message' => xcd_sanitize_text($e->getMessage(), 300)), 'error');
     }
-    $ctx['panel'] = null;
-    $ctx['version'] = null;
     $stmt = $pdo->query('SELECT panel_name FROM xui_sync_panel WHERE enabled = 1 ORDER BY panel_name');
     $results = array();
     foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $panelName) {
