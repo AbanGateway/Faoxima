@@ -822,6 +822,7 @@ if (!empty($datain) && in_array($from_id, $admin_ids ?? [])) {
     $_rx_adm_cb_map = [
 
         'admin_status'      => $textbotlang['Admin']['Status']['btn'],
+        'admin_readiness'   => "🚦 آمادگی فروش",
         'admin_managepanel' => $textbotlang['Admin']['btnkeyboardadmin']['managementpanel'],
         'admin_addpanel'    => $textbotlang['Admin']['btnkeyboardadmin']['addpanel'],
         'admin_timeprice'   => "⏳ قیمت سریع زمان",

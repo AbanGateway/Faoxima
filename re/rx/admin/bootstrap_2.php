@@ -172,6 +172,14 @@ if (function_exists('rxStartMediaHandleAdminUpdate')
     return;
 }
 
+if ((isset($datain) && is_string($datain) && ($datain === 'admin_readiness' || strpos($datain, 'srd_') === 0))
+    || (is_string($text) && trim($text) === "🚦 آمادگی فروش")) {
+    require_once REFACTORED_LEGACY_ROOT . '/sales_readiness.php';
+    if (rx_sr_handle_admin_update()) {
+        return;
+    }
+}
+
 if (in_array($text, $textadmin) || $datain == "admin") {
     if ($datain == "admin")
         deletemessage($from_id, $message_id);

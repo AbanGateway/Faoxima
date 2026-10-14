@@ -514,6 +514,7 @@ $keyboardPanel = json_encode([
 ]);
 if($adminrulecheck['rule'] == "administrator"){
 $keyboardadmin = rx_kb_encode([
+        [rx_kb_style(['text' => "🚦 آمادگی فروش", 'callback_data' => 'admin_readiness'], 'admin_readiness', $_rx_adm_styles)],
         [rx_kb_style(['text' => $textbotlang['Admin']['Status']['btn'], 'callback_data' => 'admin_status'], 'admin_status', $_rx_adm_styles)],
         [rx_kb_style(['text' => "📁 مدیریت پنل‌ها و سرورها", 'callback_data' => 'admin_panels'], 'admin_panels', $_rx_adm_styles)],
         [
