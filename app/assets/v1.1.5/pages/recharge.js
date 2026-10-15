@@ -2,6 +2,7 @@ import { call, ApiError } from '../api.js?v=0.0.53';
 import { escapeHtml, fmtPrice, skeletonList, toast, copyToClipboard, wireAmountInput, amountValue, blobToDataUrl, rialCopyValue } from '../utils.js?v=0.0.53';
 import { hapticImpact, hapticNotify, isDesktopPlatform } from '../telegram.js?v=0.0.52';
 import { icon } from '../icons.js?v=0.0.52';
+import { isVerifyPayment, verifyAmountHtml, verifyReceiptNoteHtml, wireVerify, showVerifyPending } from '../card-verify.js?v=0.0.4';
 
 function iconForMethod(m) {
     const id = String(m.id || '').toLowerCase();
@@ -408,6 +409,7 @@ function renderForm(view, methodId, method, limits, randomWallet) {
             const obj = res?.obj || {};
             handleInitResult(view, methodId, obj);
         } catch (err) {
+            if (showVerifyPending(view, err)) return;
             hapticNotify('error');
             toast(err.message || 'خطا در آغاز پرداخت', 'error', 4000);
         } finally {
@@ -652,17 +654,17 @@ function renderCardVerifyStep(d) {
                     <span class="kv-label">به نام</span>
                     <span class="kv-value">${escapeHtml(d.name_card || '—')}</span>
                 </div>
-                <div class="kv mt-sm">
+                ${isVerifyPayment(d) ? verifyAmountHtml(d) : `<div class="kv mt-sm">
                     <span class="kv-label">مبلغ دقیق</span>
                     <span class="kv-value mono accent" style="font-size:18px;font-weight:700">${fmtNum(amount)} تومان</span>
                 </div>
                 <button type="button" class="btn btn-ghost btn-block mt-sm copy-btn-amount" data-copy="${rialCopyValue(d)}">
                     ${icon('copy', 'class="ico ico-leading"')}<span>کپی مبلغ به ریال</span>
-                </button>
+                </button>`}
 
                 <div class="card-section mt-md receipt-upload-zone">
                     <p class="section-title">${icon('fileText')} ارسال رسید پرداخت</p>
-                    <p class="muted" style="font-size:13px">پس از واریز، عکس رسید را آپلود کنید تا برای ادمین ارسال شود.</p>
+                    <p class="muted" style="font-size:13px">پس از واریز، عکس رسید را آپلود کنید تا برای ادمین ارسال شود.</p>${isVerifyPayment(d) ? verifyReceiptNoteHtml(d) : ''}
                     <input type="file" id="receipt-file" accept="image/*" style="display:none" />
                     <button type="button" id="receipt-pick" class="btn btn-primary btn-block mt-sm">
                         ${icon('download', 'class="ico ico-leading"')}<span>انتخاب عکس رسید</span>
@@ -805,6 +807,7 @@ function renderCardToCard(d) {
 
             ${cardBlock}
 
+            ${isVerifyPayment(d) ? verifyAmountHtml(d) : `
             <div class="kv mt-sm">
                 <span class="kv-label">مبلغ دقیق</span>
                 <span class="kv-value mono accent" style="font-size:18px;font-weight:700">${fmtNum(amount)} تومان</span>
@@ -818,11 +821,11 @@ function renderCardToCard(d) {
                 <div class="callout mt-md">
                     ${icon('info', 'class="ico ico-leading"')}
                     <span>مبلغ دقیقاً همانطور که نمایش داده شده واریز شود — تأیید خودکار است.</span>
-                </div>` : ''}
+                </div>` : ''}`}
 
             <div class="card-section mt-md receipt-upload-zone">
                 <p class="section-title">${icon('fileText')} ارسال رسید پرداخت</p>
-                <p class="muted" style="font-size:13px">پس از واریز، عکس رسید را آپلود کنید تا برای ادمین ارسال شود.</p>
+                <p class="muted" style="font-size:13px">پس از واریز، عکس رسید را آپلود کنید تا برای ادمین ارسال شود.</p>${isVerifyPayment(d) ? verifyReceiptNoteHtml(d) : ''}
 
                 <input type="file" id="receipt-file" accept="image/*" style="display:none" />
                 <button type="button" id="receipt-pick" class="btn btn-primary btn-block mt-sm">
@@ -866,7 +869,7 @@ async function resetPendingCartPayment(orderId) {
 
 function wireCardToCard(view, d, extraFields = {}) {
     const orderId = String(d.order_id || '').trim();
-    let shouldResetOnLeave = orderId !== '';
+    let shouldResetOnLeave = orderId !== '' && !isVerifyPayment(d);
     let resetPromise = null;
 
     const stopLeaveReset = () => {
@@ -903,6 +906,10 @@ function wireCardToCard(view, d, extraFields = {}) {
             hapticImpact('light');
         });
     });
+
+    if (isVerifyPayment(d)) {
+        wireVerify(view, d, { successHref: '#/account', successLabel: 'بازگشت به حساب' });
+    }
 
     const $file = view.querySelector('#receipt-file');
     const $pick = view.querySelector('#receipt-pick');

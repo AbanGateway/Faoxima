@@ -3320,31 +3320,41 @@ $textonebuy
     step('get_step_payment', $from_id);
 } elseif ($user['step'] == "get_step_payment") {
     if (isset($update['message']) && empty($datain)) { return; }
-    if (!rx_ck_bot_payment_guard($user, $message_id)) { return; }
+    if (!preg_match('/^sbv(resume|cancel)_\w+$/', (string) $datain) && !rx_ck_bot_payment_guard($user, $message_id)) { return; }
     $__chargeBonus = function_exists('nm_pending_charge_bonus') ? nm_pending_charge_bonus($user) : 0;
     if ($datain == "cart_to_offline") {
         $from_id_sql = (string) $from_id;
 
         $_cc_keep_invoice = "{$user['Processing_value_tow']}|{$user['Processing_value_one']}";
-        $stale_cutoff = date('Y/m/d H:i:s', time() - 15 * 60);
-        rxCancelAbandonedCardPaymentsForUser($from_id_sql, 'stale_unpaid', [
-            'methods' => ['cart to cart'],
-            'created_before' => $stale_cutoff,
-            'preserve_invoice_key' => $_cc_keep_invoice,
-        ]);
-        rxCancelAbandonedCardPaymentsForUser($from_id_sql, 'superseded', [
-            'methods' => ['cart to cart'],
-            'preserve_invoice_key' => $_cc_keep_invoice,
-        ]);
+        $_sbv_reuse = function_exists('rx_sbv_find_reusable') ? rx_sbv_find_reusable($from_id_sql, $_cc_keep_invoice, $user['Processing_value']) : null;
+        if ($_sbv_reuse === null && function_exists('rx_sbv_active_payment')) {
+            $_sbv_active = rx_sbv_active_payment($from_id_sql);
+            if ($_sbv_active !== null) {
+                rx_sbv_bot_pending_notice($from_id, $message_id, $_sbv_active);
+                return;
+            }
+        }
+        if ($_sbv_reuse === null) {
+            $stale_cutoff = date('Y/m/d H:i:s', time() - 15 * 60);
+            rxCancelAbandonedCardPaymentsForUser($from_id_sql, 'stale_unpaid', [
+                'methods' => ['cart to cart'],
+                'created_before' => $stale_cutoff,
+                'preserve_invoice_key' => $_cc_keep_invoice,
+            ]);
+            rxCancelAbandonedCardPaymentsForUser($from_id_sql, 'superseded', [
+                'methods' => ['cart to cart'],
+                'preserve_invoice_key' => $_cc_keep_invoice,
+            ]);
 
-        $_stmt = $connect->prepare("SELECT id FROM Payment_report WHERE id_user = ? AND (payment_Status = 'Unpaid' OR payment_Status = 'waiting' OR payment_Status = 'pending') AND Payment_Method = 'cart to cart' LIMIT 1");
-        $_stmt->bind_param("s", $from_id_sql);
-        $_stmt->execute();
-        $checkpay = $_stmt->get_result();
-        $_stmt->close();
-        if (mysqli_num_rows($checkpay) != 0) {
-            sendmessage($from_id, $textbotlang['Admin']['SettingPayment']['issetpay'], null, 'HTML');
-            return;
+            $_stmt = $connect->prepare("SELECT id FROM Payment_report WHERE id_user = ? AND (payment_Status = 'Unpaid' OR payment_Status = 'waiting' OR payment_Status = 'pending') AND Payment_Method = 'cart to cart' LIMIT 1");
+            $_stmt->bind_param("s", $from_id_sql);
+            $_stmt->execute();
+            $checkpay = $_stmt->get_result();
+            $_stmt->close();
+            if (mysqli_num_rows($checkpay) != 0) {
+                sendmessage($from_id, $textbotlang['Admin']['SettingPayment']['issetpay'], null, 'HTML');
+                return;
+            }
         }
         $mainbalance = select("PaySetting", "ValuePay", "NamePay", "minbalancecart", "select")['ValuePay'];
         $maxbalance = select("PaySetting", "ValuePay", "NamePay", "maxbalancecart", "select")['ValuePay'];
@@ -3404,8 +3414,30 @@ $textonebuy
 
         $card_number = $card_info['cardnumber'];
         $PaySettingname = $card_info['namecard'];
-        $valueprice = number_format($user['Processing_value']);
-        $price_copy = intval($user['Processing_value'] . "0");
+        $_sbv_new = false;
+        if ($_sbv_reuse !== null) {
+            $randomString = (string) $_sbv_reuse['id_order'];
+        } else {
+            $randomString = bin2hex(random_bytes(5));
+            if (function_exists('rx_sbv_enabled') && rx_sbv_enabled()) {
+                $_sbv_prep = rx_sbv_prepare($randomString, $from_id_sql, $user['Processing_value']);
+                if (empty($_sbv_prep['ok']) && ($_sbv_prep['reason'] ?? '') === 'active_exists') {
+                    rx_sbv_bot_pending_notice($from_id, 0, $_sbv_prep['active']);
+                    return;
+                }
+                if (empty($_sbv_prep['ok'])) {
+                    $_sbv_err =($_sbv_prep['reason'] ?? '') === 'exhausted'
+                        ? "❌ در حال حاضر امکان ساخت مبلغ یکتا برای این مبلغ وجود ندارد. لطفاً چند دقیقه دیگر دوباره تلاش کنید یا روش پرداخت دیگری انتخاب کنید."
+                        : faoxima_textbot_get('dyn_errors_purchase_or_payment_restart', '❌ خطایی رخ داده است لطفا مراحل خرید یا پرداخت  را مجدد انجام دهید');
+                    sendmessage($from_id, $_sbv_err, $keyboard, 'HTML');
+                    return;
+                }
+                $_sbv_new = true;
+            }
+        }
+        $_sbv_bot = (function_exists('rx_sbv_bot_payment_view') && ($_sbv_new || $_sbv_reuse !== null)) ? rx_sbv_bot_payment_view($randomString) : null;
+        $valueprice = $_sbv_bot !== null ? $_sbv_bot['valueprice'] : number_format($user['Processing_value']);
+        $price_copy = $_sbv_bot !== null ? $_sbv_bot['price_copy'] : intval($user['Processing_value'] . "0");
 
         if ($_cmode == 'direct' && $_card2) {
             $textcart = "💳 <b>کارت اول</b>\n🔢 <code>{$card_number}</code>\n👤 {$PaySettingname}\n\n💳 <b>کارت دوم</b>\n🔢 <code>{$_card2['cardnumber']}</code>\n👤 {$_card2['namecard']}\n\n💰 مبلغ: {$valueprice} تومان";
@@ -3413,25 +3445,34 @@ $textonebuy
             $replacements = ['{price}' => $valueprice, '{card_number}' => $card_number, '{name_card}' => $PaySettingname];
             $textcart = strtr($datatextbot['text_cart'], $replacements);
         }
+        if ($_sbv_bot !== null) {
+            $textcart .= $_sbv_bot['block'];
+        }
         $invoice = "{$user['Processing_value_tow']}|{$user['Processing_value_one']}";
         $dateacc = date('Y/m/d H:i:s');
-        $randomString = bin2hex(random_bytes(5));
         $payment_Status = "Unpaid";
         $Payment_Method = "cart to cart";
         $_cc_insert_ok = false;
-        try {
-            $stmt = $connect->prepare("INSERT INTO Payment_report (id_user,id_order,time,price,payment_Status,Payment_Method,id_invoice) VALUES (?,?,?,?,?,?,?)");
-            if ($stmt) {
-                $stmt->bind_param("sssssss", $from_id, $randomString, $dateacc, $user['Processing_value'], $payment_Status, $Payment_Method, $invoice);
-                $_cc_insert_ok = $stmt->execute() && $stmt->affected_rows === 1;
-                $_cc_insert_err = $stmt->error;
-                $stmt->close();
-            } else {
-                $_cc_insert_err = $connect->error;
+        if ($_sbv_reuse !== null) {
+            $_cc_insert_ok = true;
+        } else {
+            try {
+                $stmt = $connect->prepare("INSERT INTO Payment_report (id_user,id_order,time,price,payment_Status,Payment_Method,id_invoice) VALUES (?,?,?,?,?,?,?)");
+                if ($stmt) {
+                    $stmt->bind_param("sssssss", $from_id, $randomString, $dateacc, $user['Processing_value'], $payment_Status, $Payment_Method, $invoice);
+                    $_cc_insert_ok = $stmt->execute() && $stmt->affected_rows === 1;
+                    $_cc_insert_err = $stmt->error;
+                    $stmt->close();
+                } else {
+                    $_cc_insert_err = $connect->error;
+                }
+            } catch (Throwable $_cc_insert_e) {
+                $_cc_insert_ok = false;
+                $_cc_insert_err = $_cc_insert_e->getMessage();
             }
-        } catch (Throwable $_cc_insert_e) {
-            $_cc_insert_ok = false;
-            $_cc_insert_err = $_cc_insert_e->getMessage();
+        }
+        if (!$_cc_insert_ok && $_sbv_new) {
+            rx_sbv_abandon($randomString);
         }
         if (!$_cc_insert_ok) {
             if (function_exists('rx_log_event')) {
@@ -3479,33 +3520,43 @@ $textonebuy
                     $_vc_keyboard_rows[] = [rx_kb_style(['text' => "💳 **** **** **** {$_vc_last4}", 'callback_data' => "cv_use_{$_vc_last4}"], 'cv_use', $_prcpt_s)];
                 }
                 $_vc_keyboard_rows[] = [rx_kb_style(['text' => "📷 پرداخت با کارت جدید", 'callback_data' => "cv_new"], 'cv_new', $_prcpt_s)];
+                $_sbv_cancel_row = ($_sbv_bot !== null && function_exists('rx_sbv_cancel_row')) ? rx_sbv_cancel_row((string) $randomString) : null;
+                if ($_sbv_cancel_row !== null) {
+                    $_vc_keyboard_rows[] = $_sbv_cancel_row;
+                }
                 $_vc_kb = json_encode(['inline_keyboard' => $_vc_keyboard_rows]);
                 step('card_select_step', $from_id);
                 sendmessage($from_id, $datatextbot['dyn_wallet_select_verified_card'] ?? "💳 کارت‌های تاییدشده شما:\n\nیکی از کارت‌های زیر را انتخاب کنید یا با کارت جدید پرداخت کنید:", $_vc_kb, 'HTML');
             } else {
                 step('card_photo_step', $from_id);
-                sendmessage($from_id, $datatextbot['dyn_wallet_card_auth_active_notice'] ?? "⚠️ احراز هویت کارت به کارت فعال است\n\n📸 لطفا تصویر کارت فیزیکی خود را که قصد واریز با آن را دارید، ارسال کنید.\n\n🔘 نکته مهم: برای تایید تراکنش، الزامی است که ۴ رقم آخر شماره کارت و نام شما در تصویر کاملاً واضح و خوانا باشد. (سایر اطلاعات را می‌توانید بپوشانید).", $backuser, 'HTML');
+                sendmessage($from_id, $datatextbot['dyn_wallet_card_auth_active_notice'] ?? "⚠️ احراز هویت کارت به کارت فعال است\n\n📸 لطفا تصویر کارت فیزیکی خود را که قصد واریز با آن را دارید، ارسال کنید.\n\n🔘 نکته مهم: برای تایید تراکنش، الزامی است که ۴ رقم آخر شماره کارت و نام شما در تصویر کاملاً واضح و خوانا باشد. (سایر اطلاعات را می‌توانید بپوشانید).", ($_sbv_bot !== null && function_exists('rx_sbv_cancel_keyboard') && rx_sbv_cancel_keyboard((string) $randomString) !== null) ? rx_sbv_cancel_keyboard((string) $randomString) : $backuser, 'HTML');
             }
             return;
         }
 
         deletemessage($from_id, $message_id);
         $_prcpt_s = (isset($_rx_payrcpt_styles) && is_array($_rx_payrcpt_styles)) ? $_rx_payrcpt_styles : [];
-        if ($setting['statuscopycart'] == "1") {
-            $_kb_rows = [[
-                ['text' => "کپی کارت اول", 'copy_text' => ["text" => $card_number], '_rxck' => 'card_num'],
-                ['text' => "کپی مبلغ", 'copy_text' => ["text" => $price_copy], '_rxck' => 'card_amount']
-            ]];
-            if (isset($_cmode) && $_cmode == 'direct' && !empty($_card2['cardnumber'])) {
+        $_sbv_receipt_label = $_sbv_bot !== null ? $_sbv_bot['receipt_label'] : "✅ پرداخت کردم | ارسال رسید.";
+        if ($setting['statuscopycart'] == "1" || $_sbv_bot !== null) {
+            $_kb_rows = [[]];
+            if ($setting['statuscopycart'] == "1") {
+                $_kb_rows[0][] = ['text' => "کپی کارت اول", 'copy_text' => ["text" => $card_number], '_rxck' => 'card_num'];
+            }
+            $_kb_rows[0][] = ['text' => $_sbv_bot !== null ? $_sbv_bot['copy_label'] : "کپی مبلغ", 'copy_text' => ["text" => (string) $price_copy], '_rxck' => 'card_amount'];
+            if ($setting['statuscopycart'] == "1" && isset($_cmode) && $_cmode == 'direct' && !empty($_card2['cardnumber'])) {
                 $_kb_rows[] = [['text' => "کپی کارت دوم", 'copy_text' => ["text" => $_card2['cardnumber']], '_rxck' => 'card_num_2']];
             }
-            $_kb_rows[] = [rx_kb_style(['text' => "✅ پرداخت کردم | ارسال رسید.", 'callback_data' => "sendresidcart-" . $randomString], 'pay_sendreceipt', $_prcpt_s)];
+            $_kb_rows[] = [rx_kb_style(['text' => $_sbv_receipt_label, 'callback_data' => "sendresidcart-" . $randomString], 'pay_sendreceipt', $_prcpt_s)];
+            $_sbv_cancel_row = ($_sbv_bot !== null && function_exists('rx_sbv_cancel_row')) ? rx_sbv_cancel_row((string) $randomString) : null;
+            if ($_sbv_cancel_row !== null) {
+                $_kb_rows[] = $_sbv_cancel_row;
+            }
             $sendresidcart = json_encode(['inline_keyboard' => $_kb_rows]);
         } else {
             $sendresidcart = json_encode([
                 'inline_keyboard' => [
                     [
-                        rx_kb_style(['text' => "✅ پرداخت کردم | ارسال رسید.", 'callback_data' => "sendresidcart-" . $randomString], 'pay_sendreceipt', $_prcpt_s)
+                        rx_kb_style(['text' => $_sbv_receipt_label, 'callback_data' => "sendresidcart-" . $randomString], 'pay_sendreceipt', $_prcpt_s)
                     ]
                 ]
             ]);

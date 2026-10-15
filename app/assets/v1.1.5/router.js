@@ -1,12 +1,13 @@
-import { home } from './pages/home.js?v=0.0.60';
+import { home } from './pages/home.js?v=0.0.64';
 import { services as servicesPage } from './pages/services.js?v=0.0.53';
 
-import { buy as buyPage } from './pages/buy.js?v=0.0.58';
+import { buy as buyPage } from './pages/buy.js?v=0.0.62';
 import { account as accountPage } from './pages/account.js?v=0.0.52';
 import { settings as settingsPage } from './pages/settings.js?v=0.0.52';
-import { recharge as rechargePage } from './pages/recharge.js?v=0.0.58';
+import { recharge as rechargePage } from './pages/recharge.js?v=0.0.62';
 import { icon } from './icons.js?v=0.0.52';
-import { methodLabel } from './payment-ui.js?v=0.0.61';
+import { methodLabel, handleInitResult } from './payment-ui.js?v=0.0.65';
+import { startVerifyTracker } from './card-verify.js?v=0.0.4';
 
 
 let _watchModulePromise = null;
@@ -59,6 +60,35 @@ async function watchResumePage(view, encodedOrderId) {
             expiresAtSec = nowSec + WATCH_WINDOW_SEC;
         }
     } catch (_) {  }
+    if (statusObj.verify && methodStr === 'cart to cart' && paymentStatus === 'Unpaid' && String(statusObj.verify.verify_status || '') === 'waiting') {
+        view.innerHTML = `
+            <article class="card card-window">
+                <header class="card-window-bar"><span class="dots"><span></span><span></span><span></span></span><span class="window-url">faoxima/payment</span></header>
+                <div class="card-body">
+                    <div id="pay-form-host"></div>
+                    <div id="pay-result-host"></div>
+                </div>
+            </article>`;
+        try {
+            const api = await import('./api.js?v=0.0.53');
+            const r = await api.call('payment_init', { method: 'POST', body: { method: 'carttocart', resume_order_id: orderId } });
+            handleInitResult(view, 'carttocart', r?.obj || {}, { successCta: { href: '#/account', label: 'بازگشت به حساب' } });
+        } catch (err) {
+            const $res = view.querySelector('#pay-result-host');
+            if ($res) {
+                $res.innerHTML = `
+                    <div class="empty">
+                        ${icon('alert', 'class="ico ico-xxl ico-warn"')}
+                        <h3>${(err && err.message) ? String(err.message).replace(/[<>&"]/g, '') : 'این پرداخت دیگر قابل ادامه نیست.'}</h3>
+                        <a href="#/" class="btn btn-primary mt-md">${icon('home', 'class="ico ico-leading"')}<span>خانه</span></a>
+                    </div>`;
+            }
+        }
+        return;
+    }
+    if (statusObj.verify && methodStr === 'cart to cart') {
+        return startVerifyTracker(view, orderId, { flow: flowStr });
+    }
 
     if (paymentStatus === 'reject' || paymentStatus === 'cancelled' || paymentStatus === 'expire') {
         const titleText = paymentStatus === 'cancelled'
@@ -95,6 +125,7 @@ async function watchResumePage(view, encodedOrderId) {
             </article>`;
         return;
     }
+
 
     const isCryptoFlow = methodStr.includes('digital') || methodStr.includes('arze') || methodStr.includes('crypto');
     const isDirectBuy = flowStr === 'direct_buy';

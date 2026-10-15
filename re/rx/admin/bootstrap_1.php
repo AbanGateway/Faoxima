@@ -896,6 +896,7 @@ if (!empty($datain) && in_array($from_id, $admin_ids ?? [])) {
         'cart_group_num'   => "♻️ نمایش گروهی شماره کارت",
         'cart_export_num'  => "📄 خروجی شماره کارت فعال",
         'cart_autocheck'   => "🤖 تایید رسید بدون بررسی",
+        'cart_smsverify'   => "🔐 تأیید رسید با بررسی",
         'cart_except_user' => "⚙️ تنظیمات تایید خودکار",
         'cart_autotime'    => "⏳ زمان تایید خودکار",
         'cart_back'        => $textbotlang['Admin']['backadmin'],

@@ -2274,6 +2274,8 @@ try {
         ['helpnowpayment', '2'],
         ['helpofflinearze', '2'],
         ['autoconfirmcart', 'offauto'],
+        ['sbv_status', 'off'],
+        ['sbv_lifetime_min', '30'],
         ['cashbacknowpayment', '0'],
         ['statusstar', '0'],
         ['statusnowpayment', '0'],
@@ -3557,6 +3559,18 @@ try {
         }
     } catch (Throwable $e) {
         error_log('[table.php] payment_fulfillment create: ' . $e->getMessage());
+    }
+
+    try {
+        if (function_exists('rx_sbv_ddl')) {
+            foreach (rx_sbv_ddl() as $sbvTable => $sbvDdl) {
+                if (!$connect->query($sbvDdl)) {
+                    error_log('[table.php] ' . $sbvTable . ' create: ' . mysqli_error($connect));
+                }
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('[table.php] card_sms tables create: ' . $e->getMessage());
     }
 
     try {

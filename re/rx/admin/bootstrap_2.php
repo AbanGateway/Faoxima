@@ -172,6 +172,20 @@ if (function_exists('rxStartMediaHandleAdminUpdate')
     return;
 }
 
+if (function_exists('rx_sbv_admin_handle')
+    && rx_sbv_admin_handle([
+        'from_id' => $from_id,
+        'datain' => $datain ?? '',
+        'text' => $text ?? '',
+        'update' => $update ?? [],
+        'user' => $user ?? [],
+        'rule' => $adminrulecheck['rule'] ?? '',
+        'callback_query_id' => $callback_query_id ?? '',
+        'message_id' => $message_id ?? 0,
+    ])) {
+    return;
+}
+
 if ((isset($datain) && is_string($datain) && ($datain === 'admin_readiness' || strpos($datain, 'srd_') === 0))
     || (is_string($text) && trim($text) === "🚦 آمادگی فروش")) {
     require_once REFACTORED_LEGACY_ROOT . '/sales_readiness.php';

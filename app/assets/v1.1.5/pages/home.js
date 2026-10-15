@@ -4,7 +4,8 @@ import { setUser } from '../state.js';
 import { icon } from '../icons.js?v=0.0.52';
 import { hapticImpact, showConfirm, getInitDataUnsafe } from '../telegram.js?v=0.0.52';
 import { mountHomeBell } from '../notifications.js?v=0.0.52';
-import { methodLabel } from '../payment-ui.js?v=0.0.61';
+import { methodLabel } from '../payment-ui.js?v=0.0.65';
+import { cancelVerifyPayment } from '../card-verify.js?v=0.0.4';
 
 function greetingName() {
     try {
@@ -261,7 +262,7 @@ async function loadPendingBanner(view) {
     try {
         const res = await call('pending_payments');
         const all = Array.isArray(res?.obj?.pending) ? res.obj.pending : [];
-        pending = all.filter(p => p.method !== 'cart to cart' && p.method !== 'carttocart_pv');
+        pending = all.filter(p => (p.method !== 'cart to cart' && p.method !== 'carttocart_pv') || p.verify);
     } catch (_) { return () => {}; }
     if (!pending.length) return () => {};
 
@@ -295,7 +296,11 @@ async function loadPendingBanner(view) {
             const ok = await showConfirm('این فاکتور لغو شود؟');
             if (!ok) return;
             try {
-                await call('crypto_cancel_invoice', { method: 'POST', body: { order_id: order } });
+                if (btn.getAttribute('data-verify') === '1') {
+                    await cancelVerifyPayment(order);
+                } else {
+                    await call('crypto_cancel_invoice', { method: 'POST', body: { order_id: order } });
+                }
                 toast('فاکتور لغو شد', 'success', 2500);
                 home(view);
             } catch (err) {
@@ -366,14 +371,14 @@ function renderPendingCard(p) {
                 <div><span class="muted">باقی‌مانده</span><span class="mono pending-remaining" data-expires-at="${expiresAt}" data-method="${escapeHtml(p.method || '')}">${escapeHtml(initialRemain)}</span></div>
             </div>
             <div class="pending-banner-actions">
-                <button type="button" class="btn btn-primary btn-block" data-resume="${escapeHtml(p.order_id)}">
+                ${!p.verify || p.resumable || p.status !== 'Unpaid' ? `<button type="button" class="btn btn-primary btn-block" data-resume="${escapeHtml(p.order_id)}">
                     ${icon('arrowLeft', 'class="ico ico-leading"')}
-                    <span>ادامه پیگیری</span>
-                </button>
-                <button type="button" class="btn btn-ghost btn-block" data-cancel="${escapeHtml(p.order_id)}">
+                    <span>${p.verify && p.resumable ? 'ادامه پرداخت' : 'ادامه پیگیری'}</span>
+                </button>` : ''}
+                ${!p.verify || p.cancellable ? `<button type="button" class="btn btn-ghost btn-block" data-cancel="${escapeHtml(p.order_id)}" data-verify="${p.verify ? '1' : '0'}">
                     ${icon('close', 'class="ico ico-leading"')}
                     <span>انصراف</span>
-                </button>
+                </button>` : ''}
             </div>
         </div>
     `;

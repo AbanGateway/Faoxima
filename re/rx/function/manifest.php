@@ -24,4 +24,6 @@ return array (
   21 => 'statistics_helpers.php',
   22 => 'receipt_actions.php',
   23 => 'test_account_policy.php',
+  24 => 'receipt_verification.php',
+  25 => 'receipt_verification_admin.php',
 );

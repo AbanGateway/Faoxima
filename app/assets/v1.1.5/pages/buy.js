@@ -5,9 +5,10 @@ import {
 import { hapticImpact, hapticNotify, showConfirm, getInitDataUnsafe } from '../telegram.js?v=0.0.52';
 import { getBuyDraft, setBuyDraft, clearBuyDraft } from '../state.js';
 import { icon } from '../icons.js?v=0.0.52';
+import { showVerifyPending } from '../card-verify.js?v=0.0.4';
 import {
     fmtNum, renderMethodCard, handleInitResult, resolveWalletChoice, walletBreakdownHtml,
-} from '../payment-ui.js?v=0.0.61';
+} from '../payment-ui.js?v=0.0.65';
 
 
 let _successModulePromise = null;
@@ -806,6 +807,7 @@ export async function buy(view) {
                     onSuccess:   () => { clearBuyDraft(); },
                 });
             } catch (err) {
+                if (showVerifyPending($inline, err)) return;
                 hapticNotify('error');
                 toast(err.message || 'خطا در آغاز پرداخت', 'error', 4000);
             }

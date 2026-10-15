@@ -5,7 +5,8 @@ import {
 } from '../utils.js?v=0.0.52';
 import { hapticImpact, hapticNotify, showConfirm, openLink, supportsNativeDownload, downloadFileNative } from '../telegram.js?v=0.0.52';
 import { icon } from '../icons.js?v=0.0.52';
-import { renderMethodCard, handleInitResult, resolveWalletChoice, walletBreakdownHtml } from '../payment-ui.js?v=0.0.61';
+import { showVerifyPending } from '../card-verify.js?v=0.0.4';
+import { renderMethodCard, handleInitResult, resolveWalletChoice, walletBreakdownHtml } from '../payment-ui.js?v=0.0.65';
 
 const ALL_ACTIONS = [
     { id: 'renew',           label: 'تمدید سرویس',            ico: 'rotate',     cls: '', inline: true  },
@@ -1846,6 +1847,7 @@ async function renderRenewInlinePayment($panel, pay, reload) {
                 successCta:  { href: '#/services', label: 'بازگشت به سرویس‌ها' },
             });
         } catch (err) {
+            if (showVerifyPending($host, err)) return;
             hapticNotify('error');
             toast(err.message || 'خطا در آغاز پرداخت', 'error', 4000);
         }
@@ -2153,6 +2155,7 @@ async function renderExtraInlinePayment($host, pay, reload, $panel, kind) {
                 successCta:  { href: '#/services', label: 'بازگشت به سرویس‌ها' },
             });
         } catch (err) {
+            if (showVerifyPending($host, err)) return;
             hapticNotify('error');
             toast(err.message || 'خطا در آغاز پرداخت', 'error', 4000);
         }

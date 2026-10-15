@@ -116,6 +116,37 @@ if (preg_match('/Confirmpay_user_(\w+)_(\w+)/', $datain, $dataget)) {
         ));
     }
 }
+if (preg_match('/^sbv(resume|cancel)_(\w+)$/', (string) $datain, $_sbvm) && function_exists('rx_sbv_active_payment')) {
+    if ($_sbvm[1] === 'cancel') {
+        $_sbv_res = rx_sbv_cancel_active($from_id, $_sbvm[2]);
+        telegram('answerCallbackQuery', [
+            'callback_query_id' => $callback_query_id,
+            'text' => $_sbv_res['message'],
+            'show_alert' => empty($_sbv_res['ok']),
+            'cache_time' => 0,
+        ]);
+        if (!empty($_sbv_res['ok']) || ($_sbv_res['code'] ?? '') === 'not_active') {
+            if (in_array((string) ($user['step'] ?? ''), ['card_select_step', 'card_photo_step', 'card_last4_step', 'cart_to_cart_user'], true)
+                && (string) ($user['Processing_value'] ?? '') === $_sbvm[2]) {
+                step('home', $from_id);
+            }
+            rx_sbv_bot_mark_cancelled($from_id, $message_id, !empty($_sbv_res['ok'])
+                ? "❌ این پرداخت لغو شد و دیگر قابل واریز نیست.\n🛒 کد پیگیری: <code>" . htmlspecialchars($_sbvm[2], ENT_QUOTES, 'UTF-8') . "</code>\n\nاکنون می‌توانید پرداخت جدیدی ایجاد کنید."
+                : $_sbv_res['message']);
+        }
+    } elseif (rx_sbv_bot_resume($from_id, $_sbvm[2], $user)) {
+        telegram('answerCallbackQuery', ['callback_query_id' => $callback_query_id, 'cache_time' => 0]);
+        deletemessage($from_id, $message_id);
+    } else {
+        telegram('answerCallbackQuery', [
+            'callback_query_id' => $callback_query_id,
+            'text' => 'این پرداخت دیگر قابل ادامه نیست.',
+            'show_alert' => true,
+            'cache_time' => 0,
+        ]);
+    }
+    return;
+}
 if (preg_match('/^sendresidcart-(.*)/', $datain, $dataget)) {
     $timefivemin = time() - 120;
     $timefivemin = date('Y/m/d H:i:s', intval($timefivemin));
@@ -140,6 +171,21 @@ if (preg_match('/^sendresidcart-(.*)/', $datain, $dataget)) {
         sendmessage($from_id, "❗زمان این تراکنش به پایان رسیده و امکان پرداخت این تراکنش وجود ندارد.", null, 'HTML');
         return;
     }
+    if (function_exists('rx_sbv_receipt_gate')) {
+        $_sbv_gate = rx_sbv_receipt_gate((string) $payemntcheck['id_order']);
+        if (empty($_sbv_gate['ok'])) {
+            $_sbv_alert = telegram('answerCallbackQuery', [
+                'callback_query_id' => $callback_query_id,
+                'text' => $_sbv_gate['message'],
+                'show_alert' => true,
+                'cache_time' => 0,
+            ]);
+            if (!is_array($_sbv_alert) || empty($_sbv_alert['ok'])) {
+                sendmessage($from_id, $_sbv_gate['message'], null, 'HTML');
+            }
+            return;
+        }
+    }
     deletemessage($from_id, $message_id);
     sendmessage($from_id, "🖼 تصویر رسید خود را ارسال نمایید", $backuser, 'HTML');
     step('cart_to_cart_user', $from_id);
@@ -159,7 +205,7 @@ if (preg_match('/^sendresidcart-(.*)/', $datain, $dataget)) {
 
 📸 لطفا تصویر کارت فیزیکی خود را که قصد واریز با آن را دارید، ارسال کنید.
 
-🔘 نکته مهم: برای تایید تراکنش، الزامی است که ۴ رقم آخر شماره کارت و نام شما در تصویر کاملاً واضح و خوانا باشد. (سایر اطلاعات را می‌توانید بپوشانید).", $backuser, 'HTML');
+🔘 نکته مهم: برای تایید تراکنش، الزامی است که ۴ رقم آخر شماره کارت و نام شما در تصویر کاملاً واضح و خوانا باشد. (سایر اطلاعات را می‌توانید بپوشانید).", (function_exists('rx_sbv_cancel_keyboard') && rx_sbv_cancel_keyboard((string) $orderId) !== null) ? rx_sbv_cancel_keyboard((string) $orderId) : $backuser, 'HTML');
         return;
     }
     if (preg_match('/^cv_use_(\d{4})$/', $datain, $_cv_m)) {
@@ -245,27 +291,39 @@ if (preg_match('/^sendresidcart-(.*)/', $datain, $dataget)) {
         $PaySettingname = $card_info['namecard'];
         $valueprice = number_format($payRecord['price'] ?? 0);
         $price_copy = intval(($payRecord['price'] ?? 0) . "0");
+        $_sbv_bot = function_exists('rx_sbv_bot_payment_view') ? rx_sbv_bot_payment_view((string) $orderId) : null;
+        if ($_sbv_bot !== null) {
+            $valueprice = $_sbv_bot['valueprice'];
+            $price_copy = $_sbv_bot['price_copy'];
+        }
         if ($_cmode == 'direct' && $_card2) {
             $textcart = "💳 <b>کارت اول</b>\n🔢 <code>{$card_number}</code>\n👤 {$PaySettingname}\n\n💳 <b>کارت دوم</b>\n🔢 <code>{$_card2['cardnumber']}</code>\n👤 {$_card2['namecard']}\n\n💰 مبلغ: {$valueprice} تومان";
         } else {
             $replacements = ['{price}' => $valueprice, '{card_number}' => $card_number, '{name_card}' => $PaySettingname];
             $textcart = strtr($datatextbot['text_cart'] ?? "💳 مبلغ {price} تومان ({price}0 ریال) به کارت {card_number} به نام {name_card} واریز کنید.", $replacements);
         }
+        if ($_sbv_bot !== null) {
+            $textcart .= $_sbv_bot['block'];
+        }
         $_prcpt_s = (isset($_rx_payrcpt_styles) && is_array($_rx_payrcpt_styles)) ? $_rx_payrcpt_styles : [];
-        if ($setting['statuscopycart'] == "1") {
+        if ($setting['statuscopycart'] == "1" || $_sbv_bot !== null) {
             $_kb_rows = [[
-                ['text' => "کپی کارت اول", 'copy_text' => ["text" => $card_number], '_rxck' => 'card_num'],
-                ['text' => "کپی مبلغ", 'copy_text' => ["text" => $price_copy], '_rxck' => 'card_amount'],
+                ...($setting['statuscopycart'] == "1" ? [['text' => "کپی کارت اول", 'copy_text' => ["text" => $card_number], '_rxck' => 'card_num']] : []),
+                ['text' => $_sbv_bot !== null ? $_sbv_bot['copy_label'] : "کپی مبلغ", 'copy_text' => ["text" => (string) $price_copy], '_rxck' => 'card_amount'],
             ]];
-            if ($_cmode == 'direct' && !empty($_card2['cardnumber'])) {
+            if ($setting['statuscopycart'] == "1" && $_cmode == 'direct' && !empty($_card2['cardnumber'])) {
                 $_kb_rows[] = [['text' => "کپی کارت دوم", 'copy_text' => ["text" => $_card2['cardnumber']], '_rxck' => 'card_num_2']];
             }
-            $_kb_rows[] = [rx_kb_style(['text' => "✅ پرداخت کردم | ارسال رسید.", 'callback_data' => "sendresidcart-{$orderId}"], 'pay_sendreceipt', $_prcpt_s)];
+            $_kb_rows[] = [rx_kb_style(['text' => $_sbv_bot !== null ? $_sbv_bot['receipt_label'] : "✅ پرداخت کردم | ارسال رسید.", 'callback_data' => "sendresidcart-{$orderId}"], 'pay_sendreceipt', $_prcpt_s)];
+            $_sbv_cancel_row = ($_sbv_bot !== null && function_exists('rx_sbv_cancel_row')) ? rx_sbv_cancel_row((string) $orderId) : null;
+            if ($_sbv_cancel_row !== null) {
+                $_kb_rows[] = $_sbv_cancel_row;
+            }
             $sendresidcart = json_encode(['inline_keyboard' => $_kb_rows]);
         } else {
             $sendresidcart = json_encode([
                 'inline_keyboard' => [
-                    [rx_kb_style(['text' => "✅ پرداخت کردم | ارسال رسید.", 'callback_data' => "sendresidcart-{$orderId}"], 'pay_sendreceipt', $_prcpt_s)],
+                    [rx_kb_style(['text' => $_sbv_bot !== null ? $_sbv_bot['receipt_label'] : "✅ پرداخت کردم | ارسال رسید.", 'callback_data' => "sendresidcart-{$orderId}"], 'pay_sendreceipt', $_prcpt_s)],
                 ]
             ]);
         }
@@ -375,27 +433,39 @@ if (preg_match('/^sendresidcart-(.*)/', $datain, $dataget)) {
     $PaySettingname = $card_info['namecard'];
     $valueprice = number_format($payRecord['price'] ?? 0);
     $price_copy = intval(($payRecord['price'] ?? 0) . "0");
+    $_sbv_bot = function_exists('rx_sbv_bot_payment_view') ? rx_sbv_bot_payment_view((string) $orderId) : null;
+    if ($_sbv_bot !== null) {
+        $valueprice = $_sbv_bot['valueprice'];
+        $price_copy = $_sbv_bot['price_copy'];
+    }
     if ($_cmode == 'direct' && $_card2) {
         $textcart = "💳 <b>کارت اول</b>\n🔢 <code>{$card_number}</code>\n👤 {$PaySettingname}\n\n💳 <b>کارت دوم</b>\n🔢 <code>{$_card2['cardnumber']}</code>\n👤 {$_card2['namecard']}\n\n💰 مبلغ: {$valueprice} تومان";
     } else {
         $replacements = ['{price}' => $valueprice, '{card_number}' => $card_number, '{name_card}' => $PaySettingname];
         $textcart = strtr($datatextbot['text_cart'] ?? "💳 مبلغ {price} تومان ({price}0 ریال) به کارت {card_number} به نام {name_card} واریز کنید.", $replacements);
     }
+    if ($_sbv_bot !== null) {
+        $textcart .= $_sbv_bot['block'];
+    }
     $_prcpt_s = (isset($_rx_payrcpt_styles) && is_array($_rx_payrcpt_styles)) ? $_rx_payrcpt_styles : [];
-    if ($setting['statuscopycart'] == "1") {
+    if ($setting['statuscopycart'] == "1" || $_sbv_bot !== null) {
         $_kb_rows = [[
-            ['text' => "کپی شماره کارت", 'copy_text' => ["text" => $card_number], '_rxck' => 'card_num'],
-            ['text' => "کپی مبلغ", 'copy_text' => ["text" => $price_copy], '_rxck' => 'card_amount'],
+            ...($setting['statuscopycart'] == "1" ? [['text' => "کپی شماره کارت", 'copy_text' => ["text" => $card_number], '_rxck' => 'card_num']] : []),
+            ['text' => $_sbv_bot !== null ? $_sbv_bot['copy_label'] : "کپی مبلغ", 'copy_text' => ["text" => (string) $price_copy], '_rxck' => 'card_amount'],
         ]];
-        if ($_cmode == 'direct' && !empty($_card2['cardnumber'])) {
+        if ($setting['statuscopycart'] == "1" && $_cmode == 'direct' && !empty($_card2['cardnumber'])) {
             $_kb_rows[] = [['text' => "کپی شماره کارت دوم", 'copy_text' => ["text" => $_card2['cardnumber']], '_rxck' => 'card_num_2']];
         }
-        $_kb_rows[] = [rx_kb_style(['text' => "✅ پرداخت کردم | ارسال رسید.", 'callback_data' => "sendresidcart-{$orderId}"], 'pay_sendreceipt', $_prcpt_s)];
+        $_kb_rows[] = [rx_kb_style(['text' => $_sbv_bot !== null ? $_sbv_bot['receipt_label'] : "✅ پرداخت کردم | ارسال رسید.", 'callback_data' => "sendresidcart-{$orderId}"], 'pay_sendreceipt', $_prcpt_s)];
+        $_sbv_cancel_row = ($_sbv_bot !== null && function_exists('rx_sbv_cancel_row')) ? rx_sbv_cancel_row((string) $orderId) : null;
+        if ($_sbv_cancel_row !== null) {
+            $_kb_rows[] = $_sbv_cancel_row;
+        }
         $sendresidcart = json_encode(['inline_keyboard' => $_kb_rows]);
     } else {
         $sendresidcart = json_encode([
             'inline_keyboard' => [
-                [rx_kb_style(['text' => "✅ پرداخت کردم | ارسال رسید.", 'callback_data' => "sendresidcart-{$orderId}"], 'pay_sendreceipt', $_prcpt_s)],
+                [rx_kb_style(['text' => $_sbv_bot !== null ? $_sbv_bot['receipt_label'] : "✅ پرداخت کردم | ارسال رسید.", 'callback_data' => "sendresidcart-{$orderId}"], 'pay_sendreceipt', $_prcpt_s)],
             ]
         ]);
     }
@@ -827,6 +897,13 @@ if (preg_match('/^sendresidcart-(.*)/', $datain, $dataget)) {
         sendmessage($from_id, faoxima_textbot_get('dyn_errors_data_fetch_restart', '❌ خطایی در هنگام دریافت اطلاعات رخ داده است لطفا مراحل را از اول انجام دهید'), $keyboard, 'HTML');
         return;
     }
+    if (function_exists('rx_sbv_receipt_gate')) {
+        $_sbv_gate = rx_sbv_receipt_gate((string) $PaymentReport['id_order']);
+        if (empty($_sbv_gate['ok'])) {
+            sendmessage($from_id, $_sbv_gate['message'], $keyboard, 'HTML');
+            return;
+        }
+    }
     $receiptReserveStmt = $pdo->prepare("UPDATE Payment_report SET payment_Status = 'pending', dec_not_confirmed = 'receipt-uploading', at_updated = :at_updated WHERE id_order = :id_order AND id_user = :id_user AND payment_Status = 'Unpaid'");
     $receiptReserveStmt->execute([
         ':at_updated' => date('Y/m/d H:i:s'),
@@ -978,6 +1055,10 @@ if (preg_match('/^sendresidcart-(.*)/', $datain, $dataget)) {
             'format_price_cart' => $format_price_cart,
         ]);
         $rxReceiptUserText = $textbotlang['users']['Balance']['Send-receipt'];
+    }
+    if (function_exists('rx_sbv_receipt_admin_note')) {
+        $textsendrasid .= rx_sbv_receipt_admin_note((string) $PaymentReport['id_order']);
+        $Confirm_pay = rx_sbv_receipt_keyboard($Confirm_pay, (string) $PaymentReport['id_order']);
     }
     $_card_fid = (string)($PaymentReport['card_photo_file_id'] ?? '');
     $_receipt_delivered = false;

@@ -2,6 +2,7 @@ import { escapeHtml, copyToClipboard, toast, blobToDataUrl, rialCopyValue } from
 import { hapticImpact, hapticNotify, isDesktopPlatform } from './telegram.js?v=0.0.52';
 import { icon } from './icons.js?v=0.0.52';
 import { getToken } from './state.js';
+import { isVerifyPayment, verifyAmountHtml, verifyReceiptNoteHtml, wireVerify, showVerifyPending } from './card-verify.js?v=0.0.4';
 
 export function iconForMethod(m) {
     const id = String(m.id || '').toLowerCase();
@@ -168,6 +169,7 @@ export function renderCardToCard(d) {
 
             ${cardBlock}
 
+            ${isVerifyPayment(d) ? verifyAmountHtml(d) : `
             <div class="kv mt-sm">
                 <span class="kv-label">مبلغ دقیق</span>
                 <span class="kv-value mono accent" style="font-size:18px;font-weight:700">${fmtNum(amount)} تومان</span>
@@ -181,11 +183,11 @@ export function renderCardToCard(d) {
                 <div class="callout mt-md">
                     ${icon('info', 'class="ico ico-leading"')}
                     <span>مبلغ دقیقاً همانطور که نمایش داده شده واریز شود — تأیید خودکار است.</span>
-                </div>` : ''}
+                </div>` : ''}`}
 
             <div class="card-section mt-md receipt-upload-zone">
                 <p class="section-title">${icon('fileText')} ارسال رسید پرداخت</p>
-                <p class="muted" style="font-size:13px">پس از واریز، عکس رسید را آپلود کنید تا برای ادمین ارسال شود.</p>
+                <p class="muted" style="font-size:13px">پس از واریز، عکس رسید را آپلود کنید تا برای ادمین ارسال شود.</p>${isVerifyPayment(d) ? verifyReceiptNoteHtml(d) : ''}
 
                 <input type="file" id="receipt-file" accept="image/*" style="display:none" />
                 <button type="button" id="receipt-pick" class="btn btn-primary btn-block mt-sm">
@@ -234,7 +236,7 @@ export function wireCardToCard(view, d, opts = {}) {
     const successCta = opts.successCta || { href: '#/account', label: 'بازگشت به حساب' };
     const onSuccess = typeof opts.onSuccess === 'function' ? opts.onSuccess : null;
     const orderId = String(d.order_id || '').trim();
-    let shouldResetOnLeave = orderId !== '';
+    let shouldResetOnLeave = orderId !== '' && !isVerifyPayment(d);
     let resetPromise = null;
 
     const stopLeaveReset = () => {
@@ -271,6 +273,16 @@ export function wireCardToCard(view, d, opts = {}) {
             hapticImpact('light');
         });
     });
+
+    if (isVerifyPayment(d)) {
+        wireVerify(view, d, {
+            successHref: successCta.href,
+            successLabel: successCta.label,
+            rootView: opts.rootView,
+            purchaseUsername: opts.purchaseUsername,
+            onSuccess,
+        });
+    }
 
     const $file = view.querySelector('#receipt-file');
     const $pick = view.querySelector('#receipt-pick');
@@ -361,7 +373,7 @@ export function wireCardToCard(view, d, opts = {}) {
                 const $form = view.querySelector('#pay-form-host');
                 if ($form) $form.innerHTML = '';
             }
-            if (onSuccess) {
+            if (onSuccess && !isVerifyPayment(d)) {
                 try { onSuccess(envelope); } catch (_) {  }
             }
         } catch (err) {
@@ -692,11 +704,11 @@ function renderCardVerifyStep(d) {
                 <div class="kv mt-md"><span class="kv-label">شماره کارت</span><span class="kv-value mono accent">${escapeHtml(formatted || '—')}</span></div>
                 <button type="button" class="btn btn-ghost btn-block mt-sm copy-btn-cart" data-copy="${escapeHtml(cardNumber)}">${icon('copy', 'class="ico ico-leading"')}<span>کپی شماره کارت</span></button>
                 <div class="kv mt-md"><span class="kv-label">به نام</span><span class="kv-value">${escapeHtml(d.name_card || '—')}</span></div>
-                <div class="kv mt-sm"><span class="kv-label">مبلغ دقیق</span><span class="kv-value mono accent" style="font-size:18px;font-weight:700">${fmtNum(amount)} تومان</span></div>
-                <button type="button" class="btn btn-ghost btn-block mt-sm copy-btn-amount" data-copy="${rialCopyValue(d)}">${icon('copy', 'class="ico ico-leading"')}<span>کپی مبلغ به ریال</span></button>
+                ${isVerifyPayment(d) ? verifyAmountHtml(d) : `<div class="kv mt-sm"><span class="kv-label">مبلغ دقیق</span><span class="kv-value mono accent" style="font-size:18px;font-weight:700">${fmtNum(amount)} تومان</span></div>
+                <button type="button" class="btn btn-ghost btn-block mt-sm copy-btn-amount" data-copy="${rialCopyValue(d)}">${icon('copy', 'class="ico ico-leading"')}<span>کپی مبلغ به ریال</span></button>`}
                 <div class="card-section mt-md receipt-upload-zone">
                     <p class="section-title">${icon('fileText')} ارسال رسید پرداخت</p>
-                    <p class="muted" style="font-size:13px">پس از واریز، عکس رسید را آپلود کنید تا برای ادمین ارسال شود.</p>
+                    <p class="muted" style="font-size:13px">پس از واریز، عکس رسید را آپلود کنید تا برای ادمین ارسال شود.</p>${isVerifyPayment(d) ? verifyReceiptNoteHtml(d) : ''}
                     <input type="file" id="receipt-file" accept="image/*" style="display:none" />
                     <button type="button" id="receipt-pick" class="btn btn-primary btn-block mt-sm">${icon('download', 'class="ico ico-leading"')}<span>انتخاب عکس رسید</span></button>
                     <div id="receipt-preview" class="hidden mt-sm">
@@ -948,6 +960,7 @@ export async function renderInlinePayment(rootView, host, pay, opts = {}) {
                 onSuccess:   opts.onSuccess,
             });
         } catch (err) {
+            if (showVerifyPending(host, err)) return;
             hapticNotify('error');
             toast(err.message || 'خطا در آغاز پرداخت', 'error', 4000);
         }

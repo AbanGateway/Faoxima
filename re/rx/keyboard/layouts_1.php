@@ -564,6 +564,7 @@ $CartManage = rx_kb_encode([
         [rx_kb_style(['text' => "📚 آموزش کارت به کارت", 'callback_data' => 'cart_edu'], 'cart_edu', $_rx_gw_styles)],
         [['text' => "🔑 حداقل مبلغ احراز کارت", 'callback_data' => 'cart_cvmin']],
         [['text' => "🤖 تایید رسید بدون بررسی", 'callback_data' => 'cart_autocheck']],
+        [['text' => "🔐 تأیید رسید با بررسی", 'callback_data' => 'cart_smsverify']],
         [['text' => "⚙️ تنظیمات تایید خودکار", 'callback_data' => 'cart_except_user']],
         [['text' => "⏳ زمان تایید خودکار", 'callback_data' => 'cart_autotime']],
         [

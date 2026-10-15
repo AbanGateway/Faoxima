@@ -17,10 +17,18 @@ final class PaymentInitHandler extends BaseHandler
     private float $chargeDiscountAmount = 0.0;
     private float $chargePriceBeforeDiscount = 0.0;
     private ?string $checkoutId = null;
+    private bool $sbvDeferPurge = false;
+    private ?string $sbvPreparedOrder = null;
 
     public function handle(): void
     {
         $this->requireMethod('POST');
+
+        $resumeOrderId = FaoximaInput::string($this->data, 'resume_order_id');
+        if ($resumeOrderId !== '') {
+            $this->resumeVerifyPayment($resumeOrderId);
+            return;
+        }
 
         $method = FaoximaInput::string($this->data, 'method');
         $amount = FaoximaInput::int($this->data, 'amount', 0);
@@ -113,19 +121,9 @@ final class PaymentInitHandler extends BaseHandler
                 $keepInvoiceKey = ($serverPurchaseUsername !== null && $serverPurchaseUsername !== '')
                     ? 'getconfigafterpay|' . $serverPurchaseUsername
                     : null;
-                $this->purgeStaleCarttocart((int)$this->user['id'], $keepInvoiceKey);
-                $this->purgeAbandonedCarttocart((int)$this->user['id'], $keepInvoiceKey);
-
-                $pendingFresh = (int) FaoximaDb::fetchScalar(
-                    "SELECT COUNT(*) FROM Payment_report
-                      WHERE id_user = :u
-                        AND payment_Status IN ('Unpaid','pending','waiting')
-                        AND (Payment_Method = 'cart to cart' OR Payment_Method = 'carttocart_pv')
-                        AND source = 'miniapp'",
-                    [':u' => $this->user['id']]
-                );
-                if ($pendingFresh > 0) {
-                    FaoximaResponse::fail(409, faoxima_textbot_get('dyn_paymentinit_pending_request_exists', '⏳ یک درخواست پرداخت در انتظار بررسی دارید. لطفاً ابتدا آن را تکمیل یا لغو کنید.'));
+                $this->sbvDeferPurge = function_exists('rx_sbv_active_payment') && rx_sbv_active_payment((string) $this->user['id']) !== null;
+                if (!$this->sbvDeferPurge) {
+                    $this->purgeCardAndGuard($keepInvoiceKey);
                 }
             } else {
                 $this->purgeStaleGatewayOrders((int)$this->user['id'], $method);
@@ -298,6 +296,48 @@ final class PaymentInitHandler extends BaseHandler
         }
     }
 
+
+    private function failVerifyPending(array $active): void
+    {
+        FaoximaResponse::fail(409, rx_sbv_pending_message(), [
+            'code' => 'verify_pending',
+            'pending' => rx_sbv_pending_summary($active),
+        ]);
+    }
+
+    private function resumeVerifyPayment(string $orderId): void
+    {
+        $active = function_exists('rx_sbv_active_payment') ? rx_sbv_active_payment((string) $this->user['id']) : null;
+        if ($active === null || (string) $active['id_order'] !== $orderId) {
+            FaoximaResponse::fail(409, 'این پرداخت دیگر فعال نیست. اکنون می‌توانید پرداخت جدید ایجاد کنید.', ['code' => 'verify_not_active']);
+        }
+        if (empty($active['resumable'])) {
+            $this->failVerifyPending($active);
+        }
+        $self = $this;
+        $get = function (string $name) use ($self): string {
+            return $self->paySetting($name);
+        };
+        $this->handleCardToCard((int) $active['principal_toman'], $get, $active);
+    }
+
+    private function purgeCardAndGuard(?string $keepInvoiceKey): void
+    {
+        $this->purgeStaleCarttocart((int)$this->user['id'], $keepInvoiceKey);
+        $this->purgeAbandonedCarttocart((int)$this->user['id'], $keepInvoiceKey);
+
+        $pendingFresh = (int) FaoximaDb::fetchScalar(
+            "SELECT COUNT(*) FROM Payment_report
+              WHERE id_user = :u
+                AND payment_Status IN ('Unpaid','pending','waiting')
+                AND (Payment_Method = 'cart to cart' OR Payment_Method = 'carttocart_pv')
+                AND source = 'miniapp'",
+            [':u' => $this->user['id']]
+        );
+        if ($pendingFresh > 0) {
+            FaoximaResponse::fail(409, faoxima_textbot_get('dyn_paymentinit_pending_request_exists', '⏳ یک درخواست پرداخت در انتظار بررسی دارید. لطفاً ابتدا آن را تکمیل یا لغو کنید.'));
+        }
+    }
 
     private function purgeStaleCarttocart(int $userId, ?string $keepInvoiceKey = null): void
     {
@@ -475,7 +515,7 @@ final class PaymentInitHandler extends BaseHandler
     }
 
 
-    private function handleCardToCard(int $amount, callable $get): void
+    private function handleCardToCard(int $amount, callable $get, ?array $resume = null): void
     {
         $s = is_array($this->setting) ? $this->setting : [];
         $cardVerifyStatus = (string)($s['card_verify_status'] ?? 'offcardverify');
@@ -497,6 +537,22 @@ final class PaymentInitHandler extends BaseHandler
             $adminIds  = array_map('intval', array_column($adminRows ?: [], 'id_admin'));
             if (in_array((int)$this->user['id'], $adminIds, true)) {
                 $cardVerifyActive = false;
+            }
+        }
+
+        $sbvInvoiceKey = ($this->user['Processing_value_tow'] ?? '') . '|' . ($this->user['Processing_value_one'] ?? '');
+        if ($resume !== null) {
+            $sbvReuse = $resume;
+        } else {
+            $sbvReuse = function_exists('rx_sbv_find_reusable') ? rx_sbv_find_reusable((string) $this->user['id'], $sbvInvoiceKey, $amount) : null;
+            if ($sbvReuse === null && function_exists('rx_sbv_active_payment')) {
+                $sbvActive = rx_sbv_active_payment((string) $this->user['id']);
+                if ($sbvActive !== null) {
+                    $this->failVerifyPending($sbvActive);
+                }
+            }
+            if ($sbvReuse === null && $this->sbvDeferPurge) {
+                $this->purgeCardAndGuard(($this->user['Processing_value_tow'] ?? '') === 'getconfigafterpay' ? $sbvInvoiceKey : null);
             }
         }
 
@@ -572,8 +628,36 @@ final class PaymentInitHandler extends BaseHandler
         }
 
         $rialAmount = $amount * 10;
-        $orderId    = bin2hex(random_bytes(5));
-        $this->insertPaymentReport('cart to cart', $amount, $orderId);
+        if ($sbvReuse !== null) {
+            $orderId = (string) $sbvReuse['id_order'];
+            if ($resume === null && $this->checkoutId !== null) {
+                rx_ck_attach_payment($this->checkoutId, $orderId, 'cart to cart');
+            }
+        } else {
+            $orderId = bin2hex(random_bytes(5));
+            if (function_exists('rx_sbv_enabled') && rx_sbv_enabled()) {
+                $sbvPrep = rx_sbv_prepare($orderId, (string) $this->user['id'], $amount);
+                if (empty($sbvPrep['ok'])) {
+                    if (($sbvPrep['reason'] ?? '') === 'active_exists' && is_array($sbvPrep['active'] ?? null)) {
+                        $this->failVerifyPending($sbvPrep['active']);
+                    }
+                    if (($sbvPrep['reason'] ?? '') === 'busy') {
+                        FaoximaResponse::fail(409, faoxima_textbot_get('dyn_paymentinit_pending_request_exists', '⏳ یک درخواست پرداخت در انتظار بررسی دارید. لطفاً ابتدا آن را تکمیل یا لغو کنید.'));
+                    }
+                    if (($sbvPrep['reason'] ?? '') === 'exhausted') {
+                        FaoximaResponse::fail(409, '❌ در حال حاضر امکان ساخت مبلغ یکتا برای این مبلغ وجود ندارد. لطفاً چند دقیقه دیگر دوباره تلاش کنید یا روش پرداخت دیگری انتخاب کنید.', ['code' => 'verify_amount_exhausted']);
+                    }
+                    FaoximaResponse::serverError(faoxima_textbot_get('dyn_paymentinit_payment_record_failed', '❌ ثبت درخواست پرداخت ناموفق بود. لطفاً دوباره تلاش کنید.'));
+                }
+                $this->sbvPreparedOrder = $orderId;
+            }
+            $this->insertPaymentReport('cart to cart', $amount, $orderId);
+        }
+        $sbvView = function_exists('rx_sbv_public_view') ? rx_sbv_public_view($orderId) : null;
+        if ($sbvView !== null) {
+            $rialAmount = (int) $sbvView['payable_rial'];
+        }
+        $sbvMessage = $sbvView !== null ? '🔐 دقیقاً مبلغ قابل پرداخت را واریز کنید؛ پرداخت به‌صورت خودکار بررسی و تأیید می‌شود.' : null;
 
         if ($cardVerifyActive) {
             $verifiedCards = [];
@@ -605,7 +689,8 @@ final class PaymentInitHandler extends BaseHandler
                 'display_mode'          => $dMode ?? 'random',
                 'amount'                => $amount,
                 'amount_rial'           => $rialAmount,
-                'auto_confirm'          => false,
+                'auto_confirm'          => $sbvView !== null,
+                'verify'                => $sbvView,
                 'message'               => faoxima_textbot_get('dyn_paymentinit_card_verify_active', '🔒 احراز هویت کارت‌به‌کارت فعال است.'),
             ]);
         }
@@ -625,8 +710,9 @@ final class PaymentInitHandler extends BaseHandler
             'amount'                => $amount,
             'amount_rial'           => $rialAmount,
             'card_verify_required'  => false,
-            'auto_confirm'          => false,
-            'message'               => faoxima_textbot_get('dyn_paymentinit_deposit_and_upload_receipt', '💳 مبلغ را به کارت زیر واریز کنید و سپس رسید را آپلود نمایید.'),
+            'auto_confirm'          => $sbvView !== null,
+            'verify'                => $sbvView,
+            'message'               => $sbvMessage ?? faoxima_textbot_get('dyn_paymentinit_deposit_and_upload_receipt', '💳 مبلغ را به کارت زیر واریز کنید و سپس رسید را آپلود نمایید.'),
         ]);
     }
 
@@ -1198,6 +1284,9 @@ final class PaymentInitHandler extends BaseHandler
             FaoximaLogger::error('Payment_report insert failed', ['err' => $e->getMessage(), 'order' => $orderId, 'method' => $method, 'user_id' => $this->user['id'], 'has_ext' => $extId !== null]);
         }
         if (!$inserted) {
+            if ($this->sbvPreparedOrder === $orderId && function_exists('rx_sbv_abandon')) {
+                rx_sbv_abandon($orderId);
+            }
             FaoximaResponse::serverError(faoxima_textbot_get('dyn_paymentinit_payment_record_failed', '❌ ثبت درخواست پرداخت ناموفق بود. لطفاً دوباره تلاش کنید.'));
         }
         if ($this->checkoutId !== null) {
