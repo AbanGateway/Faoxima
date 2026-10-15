@@ -144,6 +144,16 @@ export function emptyState(title, subtitle = '', iconName = 'info') {
     `;
 }
 
+export function rialCopyValue(payment) {
+    const toPositive = (v) => {
+        const n = Number(v);
+        return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+    };
+    const rial = toPositive(payment && payment.amount_rial);
+    const value = rial || toPositive(payment && payment.amount) * 10;
+    return value > 0 ? value.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 0 }) : '';
+}
+
 /** Copy text to the clipboard with graceful fallback. */
 export async function copyToClipboard(text) {
     try {

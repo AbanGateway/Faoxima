@@ -1,4 +1,4 @@
-import { escapeHtml, copyToClipboard, toast, blobToDataUrl } from './utils.js?v=0.0.52';
+import { escapeHtml, copyToClipboard, toast, blobToDataUrl, rialCopyValue } from './utils.js?v=0.0.53';
 import { hapticImpact, hapticNotify, isDesktopPlatform } from './telegram.js?v=0.0.52';
 import { icon } from './icons.js?v=0.0.52';
 import { getToken } from './state.js';
@@ -172,9 +172,9 @@ export function renderCardToCard(d) {
                 <span class="kv-label">مبلغ دقیق</span>
                 <span class="kv-value mono accent" style="font-size:18px;font-weight:700">${fmtNum(amount)} تومان</span>
             </div>
-            <button type="button" class="btn btn-ghost btn-block mt-sm copy-btn-amount" data-copy="${amount}">
+            <button type="button" class="btn btn-ghost btn-block mt-sm copy-btn-amount" data-copy="${rialCopyValue(d)}">
                 ${icon('copy', 'class="ico ico-leading"')}
-                <span>کپی مبلغ</span>
+                <span>کپی مبلغ به ریال</span>
             </button>
 
             ${d.auto_confirm ? `
@@ -267,7 +267,7 @@ export function wireCardToCard(view, d, opts = {}) {
         btn.addEventListener('click', async () => {
             const txt = String(btn.dataset.copy || '');
             const ok = await copyToClipboard(txt);
-            toast(ok ? 'مبلغ کپی شد' : 'خطا در کپی', ok ? 'success' : 'error');
+            toast(ok ? 'مبلغ به ریال کپی شد' : 'خطا در کپی', ok ? 'success' : 'error');
             hapticImpact('light');
         });
     });
@@ -693,7 +693,7 @@ function renderCardVerifyStep(d) {
                 <button type="button" class="btn btn-ghost btn-block mt-sm copy-btn-cart" data-copy="${escapeHtml(cardNumber)}">${icon('copy', 'class="ico ico-leading"')}<span>کپی شماره کارت</span></button>
                 <div class="kv mt-md"><span class="kv-label">به نام</span><span class="kv-value">${escapeHtml(d.name_card || '—')}</span></div>
                 <div class="kv mt-sm"><span class="kv-label">مبلغ دقیق</span><span class="kv-value mono accent" style="font-size:18px;font-weight:700">${fmtNum(amount)} تومان</span></div>
-                <button type="button" class="btn btn-ghost btn-block mt-sm copy-btn-cart" data-copy="${amount}">${icon('copy', 'class="ico ico-leading"')}<span>کپی مبلغ</span></button>
+                <button type="button" class="btn btn-ghost btn-block mt-sm copy-btn-amount" data-copy="${rialCopyValue(d)}">${icon('copy', 'class="ico ico-leading"')}<span>کپی مبلغ به ریال</span></button>
                 <div class="card-section mt-md receipt-upload-zone">
                     <p class="section-title">${icon('fileText')} ارسال رسید پرداخت</p>
                     <p class="muted" style="font-size:13px">پس از واریز، عکس رسید را آپلود کنید تا برای ادمین ارسال شود.</p>

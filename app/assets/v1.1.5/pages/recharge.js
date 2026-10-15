@@ -1,5 +1,5 @@
 import { call, ApiError } from '../api.js?v=0.0.53';
-import { escapeHtml, fmtPrice, skeletonList, toast, copyToClipboard, wireAmountInput, amountValue, blobToDataUrl } from '../utils.js?v=0.0.52';
+import { escapeHtml, fmtPrice, skeletonList, toast, copyToClipboard, wireAmountInput, amountValue, blobToDataUrl, rialCopyValue } from '../utils.js?v=0.0.53';
 import { hapticImpact, hapticNotify, isDesktopPlatform } from '../telegram.js?v=0.0.52';
 import { icon } from '../icons.js?v=0.0.52';
 
@@ -656,8 +656,8 @@ function renderCardVerifyStep(d) {
                     <span class="kv-label">مبلغ دقیق</span>
                     <span class="kv-value mono accent" style="font-size:18px;font-weight:700">${fmtNum(amount)} تومان</span>
                 </div>
-                <button type="button" class="btn btn-ghost btn-block mt-sm copy-btn-cart" data-copy="${amount}">
-                    ${icon('copy', 'class="ico ico-leading"')}<span>کپی مبلغ</span>
+                <button type="button" class="btn btn-ghost btn-block mt-sm copy-btn-amount" data-copy="${rialCopyValue(d)}">
+                    ${icon('copy', 'class="ico ico-leading"')}<span>کپی مبلغ به ریال</span>
                 </button>
 
                 <div class="card-section mt-md receipt-upload-zone">
@@ -809,9 +809,9 @@ function renderCardToCard(d) {
                 <span class="kv-label">مبلغ دقیق</span>
                 <span class="kv-value mono accent" style="font-size:18px;font-weight:700">${fmtNum(amount)} تومان</span>
             </div>
-            <button type="button" class="btn btn-ghost btn-block mt-sm copy-btn-amount" data-copy="${amount}">
+            <button type="button" class="btn btn-ghost btn-block mt-sm copy-btn-amount" data-copy="${rialCopyValue(d)}">
                 ${icon('copy', 'class="ico ico-leading"')}
-                <span>کپی مبلغ</span>
+                <span>کپی مبلغ به ریال</span>
             </button>
 
             ${d.auto_confirm ? `
@@ -899,7 +899,7 @@ function wireCardToCard(view, d, extraFields = {}) {
         btn.addEventListener('click', async () => {
             const txt = String(btn.dataset.copy || '');
             const ok = await copyToClipboard(txt);
-            toast(ok ? 'مبلغ کپی شد' : 'خطا در کپی', ok ? 'success' : 'error');
+            toast(ok ? 'مبلغ به ریال کپی شد' : 'خطا در کپی', ok ? 'success' : 'error');
             hapticImpact('light');
         });
     });
