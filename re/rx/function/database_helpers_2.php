@@ -3123,6 +3123,35 @@ function DirectPayment($order_id, $image = 'images.jpg', $rxToken = null)
     update("user", "Processing_value_one", "0", "id", $Balance_id['id']);
     update("user", "Processing_value_tow", "0", "id", $Balance_id['id']);
     update("user", "Processing_value_four", "0", "id", $Balance_id['id']);
+    $rxCk = null;
+    if (function_exists('rx_ck_gate_fulfillment')) {
+        $rxGate = rx_ck_gate_fulfillment($Payment_report, $rxToken);
+        $rxCk = is_array($rxGate['checkout'] ?? null) ? $rxGate['checkout'] : null;
+        $rxGateAction = (string) ($rxGate['action'] ?? 'legacy');
+        $rxGateCode = (string) ($rxGate['code'] ?? 'unknown');
+        if ($rxGateAction === 'error') {
+            return rx_pf_abort($order_id, $rxToken, 'checkout_gate_error:' . $rxGateCode, true);
+        }
+        if ($rxGateAction === 'resolved_credit') {
+            sendmessage($Balance_id['id'], "پرداخت شما تأیید شد، اما موجودی کیف پول برای تکمیل خرید کافی نبود. مبلغ پرداختی شما، معادل " . rxFormatToman($rxGate['credited']) . " تومان، به کیف پولتان اضافه شد. لطفاً دوباره خرید کنید.", $keyboard, 'HTML');
+            return rx_pf_result('completed', 'wallet_credit', ['resolved' => 'wallet_credit']);
+        }
+        if ($rxGateAction === 'deny') {
+            if (!empty($rxGate['terminal'])) {
+                return rx_pf_result('already_completed', 'direct_payment_done');
+            }
+            if ($rxPhase === 'reconcile') {
+                return rx_pf_manual_review($order_id, $rxToken, 'checkout_gate_denied_during_reconcile: ' . $rxGateCode, ['id_order' => $order_id]);
+            }
+            $__refundCk = rx_ck_refund_unsecured($Payment_report, 'بازگشت وجه - سفارش دیگر قابل تکمیل نیست (' . $rxGateCode . ')');
+            if ($__refundCk === 'refunded') {
+                sendmessage($Balance_id['id'], "❌ این سفارش دیگر قابل تکمیل نیست (لغو یا قبلاً تسویه شده است). مبلغ پرداختی شما به کیف پول بازگردانده شد.", $keyboard, 'HTML');
+            } elseif ($__refundCk === 'failed') {
+                sendmessage($Balance_id['id'], "❌ این سفارش دیگر قابل تکمیل نیست و بازگشت وجه با خطا مواجه شد؛ لطفاً با پشتیبانی در ارتباط باشید.", $keyboard, 'HTML');
+            }
+            return rx_pf_fail($order_id, $rxToken, 'checkout_denied:' . $rxGateCode, $__refundCk);
+        }
+    }
     if ($steppay[0] == "getconfigafterpay") {
         $__invUsername = isset($steppay[1]) ? trim((string)$steppay[1]) : '';
         $__invOwner = trim((string)($Payment_report['id_user'] ?? ''));
@@ -3419,10 +3448,10 @@ function DirectPayment($order_id, $image = 'images.jpg', $rxToken = null)
         // اگه createUser موفق بوده، همین الان قبل از هر sendmessage/QR code generation/الخ که ممکنه hang کنه،
         // invoice رو active علامت بزن. این جلوی retry بعدی توسط cron رو می‌گیره حتی اگه پیام تلگرام hang کنه.
         $__doneNote = '[service-created at ' . date('Y-m-d H:i:s') . ' username=' . $dataoutput['username'] . ']';
-        $rxStatements = [
-            ["UPDATE user SET Balance = GREATEST(Balance - ?, 0) WHERE id = ?", [$__walletPortion, $Balance_id['id']]],
-            ["UPDATE Payment_report SET dec_not_confirmed = CASE WHEN dec_not_confirmed IS NULL OR dec_not_confirmed = '' THEN ? ELSE CONCAT(dec_not_confirmed, ' | ', ?) END WHERE id_order = ?", [$__doneNote, $__doneNote, $order_id]],
-        ];
+        $rxStatements = array_merge(
+            rx_ck_settlement_statements($rxCk, $order_id, $Balance_id['id'], (int) round($__walletPortion), 'خرید سرویس'),
+            [["UPDATE Payment_report SET dec_not_confirmed = CASE WHEN dec_not_confirmed IS NULL OR dec_not_confirmed = '' THEN ? ELSE CONCAT(dec_not_confirmed, ' | ', ?) END WHERE id_order = ?", [$__doneNote, $__doneNote, $order_id]]]
+        );
         if (!empty($get_invoice['id_invoice'])) {
             $rxStatements[] = ["UPDATE invoice SET Status = 'active' WHERE id_invoice = ?", [$get_invoice['id_invoice']]];
         }
@@ -3669,7 +3698,7 @@ $textonebuy
                 }
                 return rx_pf_fail($order_id, $rxToken, 'national_stock_empty', $__refundSt);
             }
-            update("user", "Balance", 0, "id", $Balance_id['id']);
+            $rxStatements = rx_ck_settlement_statements($rxCk, $order_id, $Balance_id['id'], -1, 'تمدید سرویس');
             update("invoice", "name_product", $prodcut['name_product'], "id_invoice", $nameloc['id_invoice']);
             update("invoice", "price_product", $prodcut['price_product'], "id_invoice", $nameloc['id_invoice']);
             update("invoice", "Volume", $prodcut['Volume_constraint'], "id_invoice", $nameloc['id_invoice']);
@@ -3837,7 +3866,7 @@ $textonebuy
             }
             return rx_pf_fail($order_id, $rxToken, 'renewal_failed', $__refundEx);
         }
-            $rxStatements[] = ["UPDATE user SET Balance = ? WHERE id = ?", [$Balance_Low_user, $Balance_id['id']]];
+            $rxStatements = array_merge($rxStatements, rx_ck_settlement_statements($rxCk, $order_id, $Balance_id['id'], -1, 'تمدید سرویس'));
         }
         $rxCompletion = rx_pf_complete($order_id, $rxToken, ['operation' => 'getextenduser', 'panel' => $extend, 'target' => $rxTargetState ?? null], $rxStatements);
         if ($rxCompletion !== 'completed') {
@@ -4085,7 +4114,7 @@ $textonebuy
             }
             return rx_pf_fail($order_id, $rxToken, 'extra_volume_failed', $__refundVx);
         }
-        $rxCompletion = rx_pf_complete($order_id, $rxToken, ['operation' => 'getextravolumeuser', 'panel' => $extra_volume, 'target' => $rxTargetState], [["UPDATE user SET Balance = ? WHERE id = ?", [$Balance_Low_user, $Balance_id['id']]]]);
+        $rxCompletion = rx_pf_complete($order_id, $rxToken, ['operation' => 'getextravolumeuser', 'panel' => $extra_volume, 'target' => $rxTargetState], rx_ck_settlement_statements($rxCk, $order_id, $Balance_id['id'], -1, 'خرید حجم اضافه'));
         if ($rxCompletion !== 'completed') {
             return rx_pf_completion_outcome($order_id, $rxToken, $rxCompletion);
         }
@@ -4271,7 +4300,7 @@ $textonebuy
             }
             return rx_pf_fail($order_id, $rxToken, 'extra_time_failed', $__refundEt);
         }
-        $rxCompletion = rx_pf_complete($order_id, $rxToken, ['operation' => 'getextratimeuser', 'panel' => $extra_time, 'target' => $rxTargetState], [["UPDATE user SET Balance = ? WHERE id = ?", [$Balance_Low_user, $nameloc['id_user']]]]);
+        $rxCompletion = rx_pf_complete($order_id, $rxToken, ['operation' => 'getextratimeuser', 'panel' => $extra_time, 'target' => $rxTargetState], rx_ck_settlement_statements($rxCk, $order_id, $Balance_id['id'], -1, 'خرید زمان اضافه'));
         if ($rxCompletion !== 'completed') {
             return rx_pf_completion_outcome($order_id, $rxToken, $rxCompletion);
         }

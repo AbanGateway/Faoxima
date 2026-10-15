@@ -157,7 +157,8 @@ final class ServiceRenewConfirmHandler extends BaseHandler
         }
 
 
-        $shortfall = $finalPrice - $balance;
+        $walletState = function_exists('rx_wallet_available') ? rx_wallet_available($this->user['id']) : ['balance' => (int) $balance, 'available' => (int) $balance];
+        $shortfall = $finalPrice - (float) $walletState['available'];
         if ($shortfall > 0 && $agent !== 'n2') {
             $directBuyEnabled = panel_feature_enabled($panel, 'directbuy');
             if (!$directBuyEnabled) {
@@ -166,8 +167,6 @@ final class ServiceRenewConfirmHandler extends BaseHandler
 
 
             $orderId = bin2hex(random_bytes(4));
-            $amountDue = (int) ceil($shortfall);
-            if ($amountDue <= 1) $amountDue = 0;
 
             $idOrder = bin2hex(random_bytes(2));
             $soCode = rxRenewalNormalizeProductCode((string)$product['code_product']);
@@ -213,13 +212,16 @@ final class ServiceRenewConfirmHandler extends BaseHandler
                 FaoximaResponse::fail(500, faoxima_textbot_get('dyn_renewconfirm_request_save_failed', '❌ خطا در ثبت درخواست تمدید. لطفاً دوباره تلاش کنید.'));
             }
 
+            $opened = $this->openCheckout('getextenduser', 'getextenduser|' . $invoice['username'] . '%' . $idOrder, (string) $invoice['username'], (int) $finalPrice, ['id_order' => $idOrder]);
+            $amountDue = (int) $opened['checkout']['external_amount'];
+
             update('user', 'Processing_value',      $amountDue,                                'id', $this->user['id']);
             update('user', 'Processing_value_one',  $invoice['username'] . '%' . $idOrder,     'id', $this->user['id']);
             update('user', 'Processing_value_tow',  'getextenduser',                           'id', $this->user['id']);
             update('user', 'Processing_value_four', '',                                        'id', $this->user['id']);
 
 
-            FaoximaResponse::ok([
+            FaoximaResponse::ok(array_merge($this->checkoutResponseFields($opened), [
                 'kind'        => 'requires_payment',
                 'amount_due'  => $amountDue,
                 'balance'     => $balance,
@@ -234,7 +236,7 @@ final class ServiceRenewConfirmHandler extends BaseHandler
                     'price'       => $finalPrice,
                 ],
                 'message'     => faoxima_textbot_get('dyn_renewconfirm_insufficient_balance_pay_shortfall', 'موجودی کیف پول کافی نیست. لطفاً مبلغ کسری را پرداخت کنید.'),
-            ]);
+            ]));
             return;
         }
 

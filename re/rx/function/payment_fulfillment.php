@@ -925,7 +925,10 @@ if (!function_exists('rx_pf_abort')) {
         if (is_array($record) && (string) $record['state'] === 'reconciling') {
             return $retryable ? rx_pf_defer($orderId, $token, $reason) : rx_pf_manual_review($orderId, $token, $reason);
         }
-        rx_pf_transition($orderId, $token, ['claimed'], $retryable ? 'released' : 'failed', $reason, null, false);
+        $abortState = rx_pf_transition($orderId, $token, ['claimed'], $retryable ? 'released' : 'failed', $reason, null, false);
+        if (!$retryable && $abortState === 'failed' && function_exists('rx_ck_release_failed_fulfillment')) {
+            rx_ck_release_failed_fulfillment($orderId, 'abort:' . $reason);
+        }
         return rx_pf_result($retryable ? 'retryable' : 'failed', $reason, $extra);
     }
 }
@@ -934,6 +937,9 @@ if (!function_exists('rx_pf_fail')) {
     function rx_pf_fail(string $orderId, string $token, string $reason, ?string $refundOutcome = null): array
     {
         rx_pf_transition($orderId, $token, ['claimed', 'applying', 'reconciling'], 'failed', $reason, null, false);
+        if (function_exists('rx_ck_release_failed_fulfillment')) {
+            rx_ck_release_failed_fulfillment($orderId, 'fail:' . $reason);
+        }
         return rx_pf_result($refundOutcome === 'refunded' ? 'refunded' : 'failed', $reason, ['refund' => $refundOutcome]);
     }
 }

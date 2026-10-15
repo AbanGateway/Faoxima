@@ -68,6 +68,10 @@ final class PaymentResetHandler extends BaseHandler
             FaoximaResponse::fail(409, '❌ رسید این پرداخت قبلاً برای ادمین ارسال شده و قابل بازنشانی نیست.');
         }
 
+        if (function_exists('rx_ck_release_for_order')) {
+            rx_ck_release_for_order($orderId, 'cancelled', 'payment_reset');
+        }
+
         FaoximaLogger::debug('Payment status reset', [
             'order'      => $orderId,
             'user_id'    => $this->user['id'],

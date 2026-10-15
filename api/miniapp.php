@@ -154,6 +154,9 @@ try {
         'test_account_info'      => ['class' => 'TestAccountHandler', 'mode' => 'info'],
         'test_account_create'    => ['class' => 'TestAccountHandler', 'mode' => 'create'],
         'service_locations'      => 'ServiceLocationsHandler',
+        'checkout_confirm'       => ['class' => 'CheckoutHandler', 'mode' => 'confirm'],
+        'checkout_cancel'        => ['class' => 'CheckoutHandler', 'mode' => 'cancel'],
+        'checkout_preview'       => ['class' => 'CheckoutHandler', 'mode' => 'preview'],
     ];
 
     $payload = FaoximaInput::payload();

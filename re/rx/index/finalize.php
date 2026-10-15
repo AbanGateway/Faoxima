@@ -198,7 +198,7 @@ if (isset($update['pre_checkout_query'])) {
         $stmtInvoice->execute([':username' => $usernamePanelExtends, ':id_user' => $from_id]);
         $nameloc = $stmtInvoice->fetch(PDO::FETCH_ASSOC);
     }
-    if ($user['Balance'] < $prodcut['price_product'] && $user['agent'] != "n2") {
+    if (rx_ck_available_for_user($user) < $prodcut['price_product'] && $user['agent'] != "n2") {
         $marzbandirectpay = panel_feature_enabled($nameloc['Service_location'], 'directbuy') ? "ondirectbuy" : "offdirectbuy";
         if ($marzbandirectpay == "offdirectbuy") {
             $minbalance = number_format(json_decode(select("PaySetting", "*", "NamePay", "minbalance", "select")['ValuePay'], true)[$user['agent']]);
@@ -220,8 +220,9 @@ if (isset($update['pre_checkout_query'])) {
                 sendmessage($from_id, sprintf($textbotlang['users']['Discount']['discountapplied'], $user['pricediscount']), null, 'HTML');
             }
             $prodcut['price_product'] = fx_finalize_amount($prodcut['price_product'], $marzban_list_get, 'product');
-            $Balance_prim = $prodcut['price_product'] - $user['Balance'];
+            $Balance_prim = $prodcut['price_product'] - rx_ck_available_for_user($user);
             update("user", "Processing_value", $Balance_prim, "id", $from_id);
+            update("user", "Processing_value_tow", "", "id", $from_id);
             sendmessage($from_id, $textbotlang['users']['sell']['None-credit'], $step_payment, 'HTML');
             step('get_step_payment', $from_id);
             return;

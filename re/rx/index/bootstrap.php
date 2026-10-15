@@ -3499,7 +3499,7 @@ $nameconfig";
             return;
         }
     }
-    if ($user['Balance'] < $pricelastextend && $user['agent'] != "n2" && intval($pricelastextend) != 0) {
+    if (rx_ck_available_for_user($user) < $pricelastextend && $user['agent'] != "n2" && intval($pricelastextend) != 0) {
         $marzbandirectpay = panel_feature_enabled($nameloc['Service_location'], 'directbuy') ? "ondirectbuy" : "offdirectbuy";
         if ($marzbandirectpay == "offdirectbuy") {
             $minbalance = json_decode(select("PaySetting", "*", "NamePay", "minbalance", "select")['ValuePay'], true)[$user['agent']];
@@ -3517,10 +3517,6 @@ $nameconfig";
             step('getprice', $from_id);
             return;
         } else {
-            $Balance_prim = $pricelastextend - $user['Balance'];
-            update("user", "Processing_value", $Balance_prim, "id", $from_id);
-            sendmessage($from_id, $textbotlang['users']['sell']['None-credit'], $step_payment, 'HTML');
-            step('get_step_payment', $from_id);
             $stmt = $connect->prepare("INSERT IGNORE INTO service_other (id_user, username,value,type,time,price,output,status) VALUES (?, ?,?, ?, ?,?,?,?)");
             $dateacc = date('Y/m/d H:i:s');
             $value = json_encode(array(
@@ -3541,6 +3537,16 @@ $nameconfig";
             $stmt->close();
             update("user", "Processing_value_one", "{$nameloc['username']}%$randomString", "id", $from_id);
             update("user", "Processing_value_tow", "getextenduser", "id", $from_id);
+            rx_ck_bot_begin($user, [
+                'operation' => 'getextenduser',
+                'op_key' => "getextenduser|{$nameloc['username']}%$randomString",
+                'target' => (string) $nameloc['username'],
+                'final_price' => $pricelastextend,
+                'message_id' => $message_id,
+                'one' => "{$nameloc['username']}%$randomString",
+                'tow' => 'getextenduser',
+                'four' => '',
+            ]);
             return;
         }
     }
@@ -4000,7 +4006,7 @@ $nameconfig";
         return;
     }
     $fxExtraQty = $fxExtraVerify['qty'];
-    if ($user['Balance'] < $__volCharge && $user['agent'] != "n2") {
+    if (rx_ck_available_for_user($user) < $__volCharge && $user['agent'] != "n2") {
         $marzbandirectpay = panel_feature_enabled($marzban_list_get, 'directbuy') ? "ondirectbuy" : "offdirectbuy";
         if ($marzbandirectpay == "offdirectbuy") {
             $minbalance = number_format(json_decode(select("PaySetting", "*", "NamePay", "minbalance", "select")['ValuePay'], true)[$user['agent']]);
@@ -4023,15 +4029,16 @@ $nameconfig";
                 sendmessage($from_id, sprintf($textbotlang['users']['Discount']['discountapplied'], $user['pricediscount']), null, 'HTML');
             }
             $__volCharge = fx_finalize_amount($__volCharge, $marzban_list_get, 'extra_volume');
-            $Balance_prim = $__volCharge - $user['Balance'];
-            update("user", "Processing_value", $Balance_prim, "id", $from_id);
-            Editmessagetext($from_id, $message_id, $textbotlang['users']['sell']['None-credit'], $step_payment);
-            step('get_step_payment', $from_id);
-            update("user", "Processing_value_one", "{$nameloc['username']}%{$valuevolume}", "id", $from_id);
-            update("user", "Processing_value_tow", "getextravolumeuser", "id", $from_id);
-            if ($__volDiscountCode !== '') {
-                update("user", "Processing_value_four", "dvol|" . $__volDiscountCode . "|" . $volume, "id", $from_id);
-            }
+            rx_ck_bot_begin($user, [
+                'operation' => 'getextravolumeuser',
+                'op_key' => "getextravolumeuser|{$nameloc['username']}%{$valuevolume}",
+                'target' => (string) $nameloc['username'],
+                'final_price' => $__volCharge,
+                'message_id' => $message_id,
+                'one' => "{$nameloc['username']}%{$valuevolume}",
+                'tow' => 'getextravolumeuser',
+                'four' => $__volDiscountCode !== '' ? "dvol|" . $__volDiscountCode . "|" . $volume : '',
+            ]);
             return;
         }
     }
@@ -4289,7 +4296,7 @@ $nameconfig";
     if ($limitfree == false) {
         $Pricechange = 0;
     }
-    if ($user['Balance'] < $Pricechange && $user['agent'] != "n2" && $limitfree) {
+    if (rx_ck_available_for_user($user) < $Pricechange && $user['agent'] != "n2" && $limitfree) {
         $marzbandirectpay = panel_feature_enabled($nameloc['Service_location'], 'directbuy') ? "ondirectbuy" : "offdirectbuy";
         if ($marzbandirectpay == "offdirectbuy") {
             $minbalance = number_format(json_decode(select("PaySetting", "*", "NamePay", "minbalance", "select")['ValuePay'], true)[$user['agent']]);
@@ -4311,8 +4318,9 @@ $nameconfig";
                 sendmessage($from_id, sprintf($textbotlang['users']['Discount']['discountapplied'], $user['pricediscount']), null, 'HTML');
             }
             if (intval($Pricechange) != 0) {
-                $Balance_prim = $Pricechange - $user['Balance'];
+                $Balance_prim = $Pricechange - rx_ck_available_for_user($user);
                 update("user", "Processing_value", $Balance_prim, "id", $from_id);
+                update("user", "Processing_value_tow", "", "id", $from_id);
                 Editmessagetext($from_id, $message_id, $textbotlang['users']['sell']['None-credit'], $step_payment);
                 step('get_step_payment', $from_id);
                 return;
@@ -4790,7 +4798,7 @@ $nameconfig";
         return;
     }
     $fxTimeQty = $fxTimeVerify['qty'];
-    if ($user['Balance'] < $__timeCharge && $user['agent'] != "n2") {
+    if (rx_ck_available_for_user($user) < $__timeCharge && $user['agent'] != "n2") {
         $marzbandirectpay = panel_feature_enabled($marzban_list_get, 'directbuy') ? "ondirectbuy" : "offdirectbuy";
         if ($marzbandirectpay == "offdirectbuy") {
             $minbalance = number_format(json_decode(select("PaySetting", "*", "NamePay", "minbalance", "select")['ValuePay'], true)[$user['agent']]);
@@ -4814,15 +4822,16 @@ $nameconfig";
             }
             $pricelasttime = fx_finalize_amount($pricelasttime, $marzban_list_get, 'extra_time');
             if (intval($pricelasttime) != 0) {
-                $Balance_prim = $pricelasttime - $user['Balance'];
-                update("user", "Processing_value", $Balance_prim, "id", $from_id);
-                Editmessagetext($from_id, $message_id, $textbotlang['users']['sell']['None-credit'], $step_payment);
-                step('get_step_payment', $from_id);
-                update("user", "Processing_value_one", "{$nameloc['username']}%{$valuetime}", "id", $from_id);
-                update("user", "Processing_value_tow", "getextratimeuser", "id", $from_id);
-                if ($__timeDiscountCode !== '') {
-                    update("user", "Processing_value_four", "dtime|" . $__timeDiscountCode . "|" . $tmieextra, "id", $from_id);
-                }
+                rx_ck_bot_begin($user, [
+                    'operation' => 'getextratimeuser',
+                    'op_key' => "getextratimeuser|{$nameloc['username']}%{$valuetime}",
+                    'target' => (string) $nameloc['username'],
+                    'final_price' => $pricelasttime,
+                    'message_id' => $message_id,
+                    'one' => "{$nameloc['username']}%{$valuetime}",
+                    'tow' => 'getextratimeuser',
+                    'four' => $__timeDiscountCode !== '' ? "dtime|" . $__timeDiscountCode . "|" . $tmieextra : '',
+                ]);
                 return;
             }
         }

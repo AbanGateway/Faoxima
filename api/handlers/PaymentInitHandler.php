@@ -16,6 +16,7 @@ final class PaymentInitHandler extends BaseHandler
     private string $chargeDiscountCode = '';
     private float $chargeDiscountAmount = 0.0;
     private float $chargePriceBeforeDiscount = 0.0;
+    private ?string $checkoutId = null;
 
     public function handle(): void
     {
@@ -26,10 +27,38 @@ final class PaymentInitHandler extends BaseHandler
 
         $serverRenewUsername = FaoximaInput::nullableString($this->data, 'renew_username');
         $serverPurchaseUsername = FaoximaInput::nullableString($this->data, 'purchase_username');
-        if ($serverRenewUsername !== null && $serverRenewUsername !== '') {
-            $amount = $this->serverPendingActionAmount();
-        } elseif ($serverPurchaseUsername !== null && $serverPurchaseUsername !== '') {
-            $amount = $this->serverPurchaseDueAmount($serverPurchaseUsername);
+        $checkoutId = FaoximaInput::string($this->data, 'checkout_id');
+        $ck = null;
+        if ($checkoutId !== '' || ($serverRenewUsername !== null && $serverRenewUsername !== '') || ($serverPurchaseUsername !== null && $serverPurchaseUsername !== '')) {
+            $expectedKey = '';
+            if ($checkoutId === '') {
+                if ($serverPurchaseUsername !== null && $serverPurchaseUsername !== '') {
+                    $expectedKey = 'getconfigafterpay|' . $serverPurchaseUsername;
+                } else {
+                    $expectedKey = (string) ($this->user['Processing_value_tow'] ?? '') . '|' . (string) ($this->user['Processing_value_one'] ?? '');
+                }
+            }
+            $ck = $this->serverCheckoutForPayment($checkoutId, $expectedKey);
+            $amount = (int) $ck['external_amount'];
+            [$ckTow, $ckOne] = rx_ck_key_parts((string) $ck['op_key']);
+            if ($ckTow === 'getconfigafterpay') {
+                $this->data['purchase_username'] = (string) $ck['target'];
+                $this->data['renew_username'] = '';
+                $serverPurchaseUsername = (string) $ck['target'];
+                $serverRenewUsername = null;
+            } else {
+                $this->data['renew_username'] = (string) $ck['target'];
+                $this->data['purchase_username'] = '';
+                $serverRenewUsername = (string) $ck['target'];
+                $serverPurchaseUsername = null;
+            }
+            $this->checkoutId = (string) $ck['checkout_id'];
+            if ((string) ($this->user['Processing_value_tow'] ?? '') !== $ckTow || (string) ($this->user['Processing_value_one'] ?? '') !== $ckOne) {
+                update('user', 'Processing_value_one', $ckOne, 'id', $this->user['id']);
+                update('user', 'Processing_value_tow', $ckTow, 'id', $this->user['id']);
+                $this->user['Processing_value_one'] = $ckOne;
+                $this->user['Processing_value_tow'] = $ckTow;
+            }
         }
 
         if ($method === '') {
@@ -47,6 +76,12 @@ final class PaymentInitHandler extends BaseHandler
 
 
         [$min, $max] = $this->methodLimits($method, $agent, $get);
+        if ($ck !== null && (int) $ck['wallet_amount'] > 0 && $amount < $min) {
+            FaoximaResponse::fail(422, faoxima_render_text(faoxima_textbot_get('dyn_ck_below_method_min', '❌ مبلغ باقی‌مانده برای پرداخت خارجی ({amount} تومان) کمتر از حداقل این روش ({min} تومان) است. لطفاً روش پرداخت دیگری انتخاب کنید یا بدون استفاده از کیف پول پرداخت کنید. مبلغ و سهم کیف پول به‌صورت خودکار تغییر نمی‌کند.'), [
+                'amount' => number_format($amount),
+                'min' => number_format($min),
+            ]), ['code' => 'below_method_min', 'external_amount' => $amount, 'min' => $min]);
+        }
         if ($amount < $min || $amount > $max) {
             FaoximaResponse::fail(422, faoxima_render_text(faoxima_textbot_get('dyn_paymentinit_amount_out_of_range', '❌ مبلغ باید بین {min} و {max} تومان باشد'), [
                 'min' => number_format($min),
@@ -108,6 +143,10 @@ final class PaymentInitHandler extends BaseHandler
                 }
             }
 
+
+            if ($ck !== null) {
+                $ck = $this->validateCheckoutForPayment($ck, $method);
+            }
 
             update('user', 'Processing_value', $amount, 'id', $this->user['id']);
             $this->user['Processing_value'] = $amount;
@@ -1160,6 +1199,9 @@ final class PaymentInitHandler extends BaseHandler
         }
         if (!$inserted) {
             FaoximaResponse::serverError(faoxima_textbot_get('dyn_paymentinit_payment_record_failed', '❌ ثبت درخواست پرداخت ناموفق بود. لطفاً دوباره تلاش کنید.'));
+        }
+        if ($this->checkoutId !== null) {
+            rx_ck_attach_payment($this->checkoutId, $orderId, $method);
         }
     }
 

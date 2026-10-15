@@ -5,7 +5,7 @@ import {
 } from '../utils.js?v=0.0.52';
 import { hapticImpact, hapticNotify, showConfirm, openLink, supportsNativeDownload, downloadFileNative } from '../telegram.js?v=0.0.52';
 import { icon } from '../icons.js?v=0.0.52';
-import { renderMethodCard, handleInitResult } from '../payment-ui.js?v=0.0.57';
+import { renderMethodCard, handleInitResult, resolveWalletChoice, walletBreakdownHtml } from '../payment-ui.js?v=0.0.60';
 
 const ALL_ACTIONS = [
     { id: 'renew',           label: 'تمدید سرویس',            ico: 'rotate',     cls: '', inline: true  },
@@ -1698,7 +1698,15 @@ function renderRenewConfirm($panel, opts, choice, username, reload) {
                 return;
             }
             if (obj.kind === 'requires_payment') {
-                renderRenewInlinePayment($panel, obj, reload);
+                const $ckRenew = $panel.querySelector('#renew-pay-host');
+                const readyRenew = await resolveWalletChoice($ckRenew, obj, call);
+                if (!readyRenew) {
+                    if ($ckRenew) $ckRenew.innerHTML = '';
+                    $btn.disabled = false;
+                    $label.textContent = old;
+                    return;
+                }
+                renderRenewInlinePayment($panel, readyRenew, reload);
                 return;
             }
             toast(obj.message || 'انجام شد', 'success');
@@ -1742,6 +1750,7 @@ async function renderRenewInlinePayment($panel, pay, reload) {
                 <span class="kv-value mono accent" style="font-size:18px;font-weight:700">${fmtNum(amountDue)} تومان</span>
             </div>
 
+            ${walletBreakdownHtml(pay.checkout)}
             <p class="section-title mt-md">${icon('creditCard')} انتخاب روش پرداخت</p>
             <div class="payment-methods" id="renew-pay-list">${skeletonList(3)}</div>
 
@@ -1807,6 +1816,7 @@ async function renderRenewInlinePayment($panel, pay, reload) {
                 if (mod && typeof mod.renderCryptoOffline === 'function') {
                     mod.renderCryptoOffline($panel, {
                         amount: amountDue,
+                        checkoutId: pay.checkout_id || '',
                         pendingKind: 'renew',
                         pendingOne: `${username}%${pay.order_id}`,
                         onBack: () => reload(),
@@ -1827,6 +1837,7 @@ async function renderRenewInlinePayment($panel, pay, reload) {
                     method: method.id,
                     amount: amountDue,
                     renew_username: username,
+                    checkout_id: pay.checkout_id || '',
                 },
             });
             const obj = r?.obj || {};
@@ -1991,7 +2002,15 @@ async function renderExtraPanel($panel, info, username, kind, reload) {
                 return;
             }
             if (obj.kind === 'requires_payment') {
-                renderExtraInlinePayment($host.querySelector('#extra-pay-host'), obj, reload, $panel, kind);
+                const $ckExtra = $host.querySelector('#extra-pay-host');
+                const readyExtra = await resolveWalletChoice($ckExtra, obj, call);
+                if (!readyExtra) {
+                    if ($ckExtra) $ckExtra.innerHTML = '';
+                    $btn.disabled = false;
+                    $label.textContent = old;
+                    return;
+                }
+                renderExtraInlinePayment($ckExtra, readyExtra, reload, $panel, kind);
                 return;
             }
             toast(obj.message || 'انجام شد', 'success');
@@ -2040,6 +2059,7 @@ async function renderExtraInlinePayment($host, pay, reload, $panel, kind) {
                 <span class="kv-label">${icon('alert')} مبلغ قابل پرداخت</span>
                 <span class="kv-value mono accent" style="font-size:18px;font-weight:700">${fmtNum(amountDue)} تومان</span>
             </div>
+            ${walletBreakdownHtml(pay.checkout)}
             <p class="section-title mt-md">${icon('creditCard')} انتخاب روش پرداخت</p>
             <div class="payment-methods" id="extra-pay-list">${skeletonList(3)}</div>
             <div id="pay-form-host"></div>
@@ -2103,6 +2123,7 @@ async function renderExtraInlinePayment($host, pay, reload, $panel, kind) {
                 if (mod && typeof mod.renderCryptoOffline === 'function') {
                     mod.renderCryptoOffline($panel, {
                         amount: amountDue,
+                        checkoutId: pay.checkout_id || '',
                         pendingKind: kind === 'time' ? 'extra_time' : 'extra_volume',
                         pendingOne: `${username}%${pay.extra_amount}`,
                         onBack: () => reload(),
@@ -2123,6 +2144,7 @@ async function renderExtraInlinePayment($host, pay, reload, $panel, kind) {
                     method: method.id,
                     amount: amountDue,
                     renew_username: username,
+                    checkout_id: pay.checkout_id || '',
                 },
             });
             const obj = r?.obj || {};

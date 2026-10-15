@@ -6,8 +6,8 @@ import { hapticImpact, hapticNotify, showConfirm, getInitDataUnsafe } from '../t
 import { getBuyDraft, setBuyDraft, clearBuyDraft } from '../state.js';
 import { icon } from '../icons.js?v=0.0.52';
 import {
-    fmtNum, renderMethodCard, handleInitResult,
-} from '../payment-ui.js?v=0.0.57';
+    fmtNum, renderMethodCard, handleInitResult, resolveWalletChoice, walletBreakdownHtml,
+} from '../payment-ui.js?v=0.0.60';
 
 
 let _successModulePromise = null;
@@ -576,7 +576,15 @@ export async function buy(view) {
 
                 if (res && res.requires_payment) {
                     hapticImpact('medium');
-                    renderInlinePayment(host, res);
+                    const $ckHost = host.querySelector('#inline-pay-host');
+                    const ready = await resolveWalletChoice($ckHost, res, call);
+                    if (!ready) {
+                        if ($ckHost) $ckHost.innerHTML = '';
+                        $btn.disabled = false;
+                        $btn.innerHTML = `<span>پرداخت و ساخت سرویس</span><span class="arrow">${icon('select', 'class="ico"')}</span>`;
+                        return;
+                    }
+                    renderInlinePayment(host, ready);
 
 
                     $btn.disabled = true;
@@ -620,7 +628,15 @@ export async function buy(view) {
                 if (data && (data.requires_payment || (data.obj && data.obj.requires_payment))) {
                     hapticImpact('medium');
                     const payload = data.requires_payment ? data : data.obj;
-                    renderInlinePayment(host, payload);
+                    const $ckHostErr = host.querySelector('#inline-pay-host');
+                    const readyErr = await resolveWalletChoice($ckHostErr, payload, call);
+                    if (!readyErr) {
+                        if ($ckHostErr) $ckHostErr.innerHTML = '';
+                        $btn.disabled = false;
+                        $btn.innerHTML = `<span>پرداخت و ساخت سرویس</span><span class="arrow">${icon('select', 'class="ico"')}</span>`;
+                        return;
+                    }
+                    renderInlinePayment(host, readyErr);
                     $btn.disabled = true;
                     $btn.innerHTML = `<span>در انتظار پرداخت کسری</span>`;
                     return;
@@ -675,6 +691,7 @@ export async function buy(view) {
                     <span class="kv-label">${icon('coin')} قیمت سرویس</span>
                     <span class="kv-value mono">${escapeHtml(fmtPrice(price))}</span>
                 </div>
+                ${walletBreakdownHtml(pay.checkout)}
                 <div class="kv">
                     <span class="kv-label">${icon('alert')} مبلغ قابل پرداخت</span>
                     <span class="kv-value mono accent" style="font-size:18px;font-weight:700">${fmtNum(amountDue)} تومان</span>
@@ -756,6 +773,7 @@ export async function buy(view) {
                     if (mod && typeof mod.renderCryptoOffline === 'function') {
                         mod.renderCryptoOffline(view, {
                             amount: amountDue,
+                            checkoutId: pay.checkout_id || '',
                             purchaseUsername: username,
                             onBack: () => render(),
                         });
@@ -776,6 +794,7 @@ export async function buy(view) {
                         method: method.id,
                         amount: amountDue,
                         purchase_username: username,
+                        checkout_id: pay.checkout_id || '',
                     },
                 });
                 const obj = r?.obj || {};

@@ -1343,7 +1343,7 @@ $text_porsant
         return;
     }
     $fxExternalQty = $fxExternalVerify['qty'];
-    if ($user['Balance'] < $volume && $user['agent'] != "n2") {
+    if (rx_ck_available_for_user($user) < $volume && $user['agent'] != "n2") {
         $marzbandirectpay = panel_feature_enabled($user['Processing_value_one'], 'directbuy') ? "ondirectbuy" : "offdirectbuy";
         if ($marzbandirectpay == "offdirectbuy") {
             $minbalance = number_format(json_decode(select("PaySetting", "*", "NamePay", "minbalance", "select")['ValuePay'], true)[$user['agent']]);
@@ -1365,8 +1365,9 @@ $text_porsant
                 sendmessage($from_id, sprintf($textbotlang['users']['Discount']['discountapplied'], $user['pricediscount']), null, 'HTML');
             }
             $volume = fx_finalize_amount($volume, $fxExternalPanel, 'extra_volume');
-            $Balance_prim = $volume - $user['Balance'];
+            $Balance_prim = $volume - rx_ck_available_for_user($user);
             update("user", "Processing_value", $Balance_prim, "id", $from_id);
+            update("user", "Processing_value_tow", "", "id", $from_id);
             sendmessage($from_id, $textbotlang['users']['sell']['None-credit'], $step_payment, 'HTML');
             step('get_step_payment', $from_id);
             return;

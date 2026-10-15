@@ -82,6 +82,8 @@ if (!function_exists('rx_walletChargeAmountAccepted')) {
         }
 
         update("user", "Processing_value", $amount, "id", $from_id);
+        update("user", "Processing_value_one", "", "id", $from_id);
+        update("user", "Processing_value_tow", "", "id", $from_id);
         update("user", "Processing_value_four", "", "id", $from_id);
 
         $__discEligibleCharge = class_exists('MiniDiscount') ? MiniDiscount::hasEligible('charge', '', '', '', $user) : false;

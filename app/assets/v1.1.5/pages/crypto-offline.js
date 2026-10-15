@@ -60,6 +60,7 @@ export function renderCryptoOffline(view, opts = {}) {
 
     const state = {
         amount: Number(opts.amount || 0),
+        checkoutId: opts.checkoutId || '',
         purchaseUsername: opts.purchaseUsername || null,
         pendingKind: opts.pendingKind || null,
         pendingOne: opts.pendingOne || null,
@@ -183,6 +184,7 @@ export function renderCryptoOffline(view, opts = {}) {
                 amount: state.amount,
                 currency_code: state.currency.code,
             };
+            if (state.checkoutId) body.checkout_id = state.checkoutId;
             if (state.purchaseUsername) body.purchase_username = state.purchaseUsername;
             if (state.pendingKind && state.pendingOne) {
                 body.pending_kind = state.pendingKind;

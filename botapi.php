@@ -941,7 +941,7 @@ function processKeyboardStyles($keyboard, $rxPlainAdmin = false) {
                             'admin_features','admin_channel','admin_help','admin_category','admin_products',
 
 
-                            'service','account','payment','user_nav','pay_receipt','invoice_copy_buttons','home_menu',
+                            'service','account','payment','user_nav','pay_receipt','invoice_copy_buttons','home_menu','wallet_checkout',
                         ];
                         foreach ($featMenus as $fm) {
                             if (!empty($all[$fm]) && is_array($all[$fm])) {
@@ -2094,6 +2094,13 @@ if (!function_exists('rx_getKeyboardDefaultStyles')) {
                     'tx_prev'     => 'primary',
                     'tx_next'     => 'primary',
                     'tx_back'     => 'danger',
+                ],
+                'wallet_checkout' => [
+                    'ck_use_wallet'   => 'success',
+                    'ck_pay_external' => 'primary',
+                    'ck_confirm'      => 'success',
+                    'ck_cancel'       => 'danger',
+                    'ck_change'       => 'primary',
                 ],
                 'payment' => [
                     'cart_to_offline'  => 'success',

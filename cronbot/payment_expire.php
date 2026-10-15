@@ -76,6 +76,10 @@ $rows = array_merge($rows, $tonpayRows);
 
 $expireStmt = $pdo->prepare("UPDATE Payment_report SET payment_Status = 'expire' WHERE id_order = :o AND payment_Status = 'Unpaid'");
 
+if (function_exists('rx_ck_expire_stale')) {
+    rx_ck_expire_stale(true);
+}
+
 if (function_exists('rxRecoverStaleReceiptUploads')) {
     $rxReceiptRecovery = rxRecoverStaleReceiptUploads(600, 50);
     if (($rxReceiptRecovery['waiting'] + $rxReceiptRecovery['unpaid'] + $rxReceiptRecovery['failed']) > 0 && function_exists('rx_log_event')) {

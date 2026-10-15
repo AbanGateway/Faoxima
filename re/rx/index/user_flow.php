@@ -270,6 +270,8 @@ if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $data
             'reply_markup' => $Response
         ]);
     }
+} elseif (preg_match('/^ckw_(pick|ok|menu|cancel)_/', (string) $datain)) {
+    rx_ck_bot_callback($user, (string) $datain, $message_id, $callback_query_id ?? null);
 } elseif (($text !== '' && $text == $datatextbot['text_help']) || $datain == "helpbtn" || $datain == "helpbtns" || $datain == "helpmenubtn" || $text == "/help" || $text == "help") {
     if (!check_active_btn($setting['keyboardmain'], "text_help")) {
         sendmessage($from_id, $textbotlang['users']['help']['disablehelp'], null, 'HTML');
@@ -1827,11 +1829,8 @@ https://t.me/$usernamebot?start={$user['codeInvitation']}";
     $stmt->close();
     $fxBuyBasePrice = $parts[0] == "customvolume" ? fx_custom_base_price($marzban_list_get, $user['agent'], $parts[2], $parts[1]) : ($info_product['fx_base_price'] ?? $fxBuyListPrice);
     fx_store_invoice_snapshot($randomString, fx_pricing_snapshot($marzban_list_get, $fxBuyKinds, $fxBuyBasePrice, $priceproduct, (float) $fxBuyListPrice - (float) $priceproduct, ['product' => (string)($info_product['code_product'] ?? '')]));
-    if ($priceproduct > $user['Balance'] && $user['agent'] != "n2" && intval($priceproduct) != 0) {
+    if ($priceproduct > rx_ck_available_for_user($user) && $user['agent'] != "n2" && intval($priceproduct) != 0) {
         $marzbandirectpay = panel_feature_enabled($marzban_list_get, 'directbuy') ? "ondirectbuy" : "offdirectbuy";
-        $Balance_prim = $priceproduct - $user['Balance'];
-        if ($Balance_prim <= 1)
-            $Balance_prim = 0;
         if ($marzbandirectpay == "offdirectbuy") {
             $minbalance = number_format(json_decode(select("PaySetting", "*", "NamePay", "minbalance", "select")['ValuePay'], true)[$user['agent']]);
             $maxbalance = number_format(json_decode(select("PaySetting", "*", "NamePay", "maxbalance", "select")['ValuePay'], true)[$user['agent']]);
@@ -1845,13 +1844,16 @@ https://t.me/$usernamebot?start={$user['codeInvitation']}";
             Editmessagetext($from_id, $message_id, sprintf($textbotlang['users']['Balance']['insufficientbalance'], $minbalance, $maxbalance), $bakinfos, 'HTML');
             step('getprice', $from_id);
         } else {
-            update("user", "Processing_value", $Balance_prim, "id", $from_id);
-            sendmessage($from_id, $textbotlang['users']['sell']['None-credit'], $step_payment, 'HTML');
-            step('get_step_payment', $from_id);
-            update("user", "Processing_value_one", $username_ac, "id", $from_id);
-            update("user", "Processing_value_tow", "getconfigafterpay", "id", $from_id);
-            if ($datain == "confirmandgetserviceDiscount")
-                update("user", "Processing_value_four", "dis_{$partsdic[0]}", "id", $from_id);
+            rx_ck_bot_begin($user, [
+                'operation' => 'getconfigafterpay',
+                'op_key' => "getconfigafterpay|{$username_ac}",
+                'target' => $username_ac,
+                'final_price' => $priceproduct,
+                'message_id' => $message_id,
+                'one' => $username_ac,
+                'tow' => 'getconfigafterpay',
+                'four' => $datain == "confirmandgetserviceDiscount" ? "dis_{$partsdic[0]}" : '',
+            ]);
         }
         return;
     }
@@ -1957,16 +1959,18 @@ https://t.me/$usernamebot?start={$user['codeInvitation']}";
     sendmessage($from_id, $textbotlang['users']['selectoption'], $keyboard, 'HTML');
     if (intval($priceproduct) != 0) {
 
+        $rxBuyDeductRows = 0;
         if (($user['agent'] ?? '') === 'n2') {
             $stmtBuyDeduct = $pdo->prepare("UPDATE user SET Balance = Balance - :delta WHERE id = :uid");
+            $stmtBuyDeduct->bindValue(':delta', (int) $priceproduct, PDO::PARAM_INT);
+            $stmtBuyDeduct->bindValue(':uid', $from_id, PDO::PARAM_STR);
+            $stmtBuyDeduct->execute();
+            $rxBuyDeductRows = $stmtBuyDeduct->rowCount();
         } else {
-            $stmtBuyDeduct = $pdo->prepare("UPDATE user SET Balance = Balance - :delta WHERE id = :uid AND Balance >= :check_delta");
-            $stmtBuyDeduct->bindValue(':check_delta', (int) $priceproduct, PDO::PARAM_INT);
+            $rxBuyDeductCharge = balance_atomic_charge($from_id, (float) (int) $priceproduct, 0);
+            $rxBuyDeductRows = !empty($rxBuyDeductCharge['ok']) ? 1 : 0;
         }
-        $stmtBuyDeduct->bindValue(':delta', (int) $priceproduct, PDO::PARAM_INT);
-        $stmtBuyDeduct->bindValue(':uid', $from_id, PDO::PARAM_STR);
-        $stmtBuyDeduct->execute();
-        if ($stmtBuyDeduct->rowCount() === 0 && function_exists('rx_log_event')) {
+        if ($rxBuyDeductRows === 0 && function_exists('rx_log_event')) {
             rx_log_event('PURCHASE_DOUBLE_SPEND_OR_INSUFFICIENT', 'Atomic buy-deduct affected 0 rows after panel account already created', [
                 'from_id'   => $from_id,
                 'invoice'   => $randomString ?? null,
@@ -3316,6 +3320,7 @@ $textonebuy
     step('get_step_payment', $from_id);
 } elseif ($user['step'] == "get_step_payment") {
     if (isset($update['message']) && empty($datain)) { return; }
+    if (!rx_ck_bot_payment_guard($user, $message_id)) { return; }
     $__chargeBonus = function_exists('nm_pending_charge_bonus') ? nm_pending_charge_bonus($user) : 0;
     if ($datain == "cart_to_offline") {
         $from_id_sql = (string) $from_id;

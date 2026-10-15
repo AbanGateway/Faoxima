@@ -83,6 +83,10 @@ final class CryptoCancelInvoiceHandler extends BaseHandler
             FaoximaResponse::serverError('خطا در لغو فاکتور');
         }
 
+        if (function_exists('rx_ck_release_for_order')) {
+            rx_ck_release_for_order($orderId, 'cancelled', 'crypto_cancelled');
+        }
+
         FaoximaLogger::debug('Crypto invoice cancelled by user', [
             'user'  => $this->user['id'],
             'order' => $orderId,

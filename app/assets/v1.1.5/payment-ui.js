@@ -872,6 +872,7 @@ export async function renderInlinePayment(rootView, host, pay, opts = {}) {
                 <span class="kv-value mono">${escapeHtml(username)}</span>
             </div>` : ''}
 
+            ${walletBreakdownHtml(pay.checkout)}
             <p class="section-title mt-md">${icon('creditCard')} انتخاب روش پرداخت</p>
             <div class="payment-methods" id="inline-pay-list"></div>
             <div id="pay-form-host"></div>
@@ -926,6 +927,7 @@ export async function renderInlinePayment(rootView, host, pay, opts = {}) {
                     method: method.id,
                     amount: amountDue,
                     purchase_username: username,
+                    checkout_id: pay.checkout_id || '',
                 },
             });
             const obj = r?.obj || {};
@@ -949,5 +951,179 @@ export async function renderInlinePayment(rootView, host, pay, opts = {}) {
             hapticNotify('error');
             toast(err.message || 'خطا در آغاز پرداخت', 'error', 4000);
         }
+    });
+}
+
+
+export function walletBreakdownHtml(checkout) {
+    if (!checkout || Number(checkout.wallet_amount || 0) <= 0) return '';
+    return `
+        <div class="kv mt-md">
+            <span class="kv-label">${icon('wallet')} سهم کیف پول (پس از تأیید پرداخت کسر می‌شود)</span>
+            <span class="kv-value mono">${escapeHtml(fmtNum(checkout.wallet_amount))} تومان</span>
+        </div>
+        <div class="kv">
+            <span class="kv-label">${icon('coin')} قیمت نهایی</span>
+            <span class="kv-value mono">${escapeHtml(fmtNum(checkout.final_price))} تومان</span>
+        </div>`;
+}
+
+export function renderWalletChoice(host, checkout, opts = {}) {
+    const callFn = opts.callFn;
+    return new Promise((resolve) => {
+        if (!host || typeof callFn !== 'function') {
+            resolve(null);
+            return;
+        }
+        let ck = checkout;
+        let picked = null;
+        let busy = false;
+
+        const balanceRows = () => `
+            <div class="kv mt-md">
+                <span class="kv-label">${icon('coin')} قیمت نهایی</span>
+                <span class="kv-value mono accent" style="font-size:18px;font-weight:700">${fmtNum(ck.final_price)} تومان</span>
+            </div>
+            <div class="kv">
+                <span class="kv-label">${icon('wallet')} موجودی کیف پول</span>
+                <span class="kv-value mono">${fmtNum(ck.recorded_balance)} تومان</span>
+            </div>
+            <div class="kv">
+                <span class="kv-label">${icon('wallet')} موجودی قابل استفاده</span>
+                <span class="kv-value mono">${fmtNum(ck.available_balance)} تومان</span>
+            </div>`;
+
+        const setBusy = (flag) => {
+            busy = flag;
+            host.querySelectorAll('button').forEach((b) => { b.disabled = flag; });
+        };
+
+        const drawChoice = (notice) => {
+            host.innerHTML = `
+                <div class="card-section cart-info-card">
+                    <div class="cart-banner">
+                        ${icon('wallet', 'class="ico ico-xxl ico-accent"')}
+                        <h3>استفاده از کیف پول در این پرداخت؟</h3>
+                        ${notice ? `<p class="muted center" style="font-size:12px">${escapeHtml(notice)}</p>` : ''}
+                    </div>
+                    ${balanceRows()}
+                    <div class="mt-md" style="display:flex;flex-direction:column;gap:8px">
+                        ${ck.can_use_wallet ? `<button class="btn btn-primary btn-wrap" type="button" data-ck="use">استفاده از کیف پول (${fmtNum(ck.use_wallet.wallet_amount)} از کیف پول + ${fmtNum(ck.use_wallet.external_amount)} پرداخت خارجی)</button>` : ''}
+                        <button class="btn btn-wrap" type="button" data-ck="none">پرداخت بدون کیف پول (${fmtNum(ck.final_price)} تومان به‌صورت کامل)</button>
+                        <button class="btn btn-danger btn-wrap" type="button" data-ck="cancel">لغو خرید</button>
+                    </div>
+                </div>`;
+            host.querySelectorAll('[data-ck]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const act = btn.dataset.ck;
+                    if (act === 'cancel') return doCancel();
+                    picked = act;
+                    drawSummary();
+                });
+            });
+        };
+
+        const drawSummary = () => {
+            const amounts = picked === 'use' ? ck.use_wallet : ck.no_wallet;
+            host.innerHTML = `
+                <div class="card-section cart-info-card">
+                    <div class="cart-banner">
+                        ${icon('creditCard', 'class="ico ico-xxl ico-accent"')}
+                        <h3>خلاصه پرداخت</h3>
+                        <p class="muted center" style="font-size:12px">${picked === 'use'
+                            ? 'سهم کیف پول تا زمان تأیید پرداخت کسر نمی‌شود. اگر هنگام تأیید موجودی کافی نباشد، مبلغ پرداخت‌شده به کیف پول شما اضافه می‌شود و خرید انجام نمی‌شود.'
+                            : 'کل مبلغ از روش پرداخت انتخابی دریافت می‌شود و موجودی کیف پول شما تغییری نمی‌کند.'}</p>
+                    </div>
+                    <div class="kv mt-md">
+                        <span class="kv-label">${icon('coin')} قیمت نهایی</span>
+                        <span class="kv-value mono">${fmtNum(ck.final_price)} تومان</span>
+                    </div>
+                    <div class="kv">
+                        <span class="kv-label">${icon('wallet')} سهم کیف پول</span>
+                        <span class="kv-value mono">${fmtNum(amounts.wallet_amount)} تومان</span>
+                    </div>
+                    <div class="kv">
+                        <span class="kv-label">${icon('alert')} مبلغ پرداخت خارجی</span>
+                        <span class="kv-value mono accent" style="font-size:18px;font-weight:700">${fmtNum(amounts.external_amount)} تومان</span>
+                    </div>
+                    <div class="mt-md" style="display:flex;flex-direction:column;gap:8px">
+                        <button class="btn btn-primary btn-wrap" type="button" data-ck="confirm">تأیید و ادامه</button>
+                        <button class="btn btn-wrap" type="button" data-ck="back">تغییر انتخاب</button>
+                        <button class="btn btn-danger btn-wrap" type="button" data-ck="cancel">لغو خرید</button>
+                    </div>
+                </div>`;
+            host.querySelectorAll('[data-ck]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const act = btn.dataset.ck;
+                    if (act === 'back') return drawChoice('');
+                    if (act === 'cancel') return doCancel();
+                    return doConfirm(amounts);
+                });
+            });
+        };
+
+        const doConfirm = async (amounts) => {
+            if (busy) return;
+            setBusy(true);
+            try {
+                const r = await callFn('checkout_confirm', {
+                    method: 'POST',
+                    body: {
+                        checkout_id: ck.checkout_id,
+                        choice: picked,
+                        expected_wallet_amount: Number(amounts.wallet_amount || 0),
+                        expected_external_amount: Number(amounts.external_amount || 0),
+                    },
+                });
+                const confirmed = r?.obj?.checkout;
+                if (!confirmed) throw new Error('پاسخ سرور نامعتبر است');
+                hapticNotify('success');
+                resolve(confirmed);
+            } catch (err) {
+                hapticNotify('error');
+                const data = err && err.data && err.data.obj;
+                if (err && err.status === 409 && data && data.code === 'refresh_required' && data.checkout) {
+                    ck = data.checkout;
+                    picked = null;
+                    busy = false;
+                    drawChoice(err.message || 'موجودی شما تغییر کرده است. لطفاً دوباره انتخاب کنید.');
+                    return;
+                }
+                toast(err.message || 'خطا در تأیید پرداخت', 'error', 5000);
+                if (err && err.status === 409) {
+                    busy = false;
+                    resolve(null);
+                    return;
+                }
+                setBusy(false);
+            }
+        };
+
+        const doCancel = async () => {
+            if (busy) return;
+            setBusy(true);
+            try {
+                await callFn('checkout_cancel', { method: 'POST', body: { checkout_id: ck.checkout_id } });
+                toast('خرید لغو شد و مبلغی از کیف پول شما کسر نشد.', 'info', 4000);
+            } catch (err) {
+                toast(err.message || 'لغو انجام نشد', 'error', 4000);
+            }
+            busy = false;
+            resolve(null);
+        };
+
+        drawChoice('');
+    });
+}
+
+export async function resolveWalletChoice(host, res, callFn) {
+    if (!res || !res.requires_wallet_choice || !res.checkout) return res;
+    const confirmed = await renderWalletChoice(host, res.checkout, { callFn });
+    if (!confirmed) return null;
+    return Object.assign({}, res, {
+        checkout: confirmed,
+        checkout_id: confirmed.checkout_id,
+        requires_wallet_choice: false,
+        amount_due: Number(confirmed.external_amount || 0),
     });
 }
