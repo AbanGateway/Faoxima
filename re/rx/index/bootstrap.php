@@ -1172,7 +1172,7 @@ if ($text == "version") {
         update("user", "verify", "1", "id", $from_id);
     }
     step('home', $from_id);
-} elseif (($text !== '' && $text == $datatextbot['text_Purchased_services']) || $datain == "backorder" || $text == "/services") {
+} elseif (($text !== '' && $text == $datatextbot['text_Purchased_services']) || $datain == "backorder" || $datain == "myservicesbtn" || $text == "/services") {
     $stmt = $pdo->prepare("SELECT * FROM invoice WHERE id_user = :id_user AND (status = 'active' OR status = 'end_of_time' OR status = 'end_of_volume' OR status = 'sendedwarn' OR status = 'send_on_hold' OR status = 'disabled' OR status = 'disablebyadmin')");
     $stmt->bindParam(':id_user', $from_id);
     $stmt->execute();
@@ -1181,6 +1181,7 @@ if ($text == "version") {
         sendmessage($from_id, $textbotlang['users']['sell']['service_not_available'], null, 'html');
         return;
     }
+    rx_section_media_enter('services', $from_id, $datain, $message_id, ['myservicesbtn'], ['myservicesbtn']);
 
     $pages = 1;
     update("user", "pagenumber", $pages, "id", $from_id);
@@ -1233,7 +1234,7 @@ if ($text == "version") {
     $keyboardlists['inline_keyboard'][] = $pagination_buttons;
     $keyboardlists['inline_keyboard'][] = $backuser;
     $keyboard_json = json_encode($keyboardlists);
-    if ($datain == "backorder") {
+    if ($datain == "backorder" || $datain == "myservicesbtn") {
         Editmessagetext($from_id, $message_id, $textbotlang['users']['sell']['service_sell'], $keyboard_json);
     } else {
         sendmessage($from_id, $textbotlang['users']['sell']['service_sell'], $keyboard_json, 'html');
@@ -5283,6 +5284,7 @@ $nameconfig";
             }
         }
         $rxTestEntryKb['inline_keyboard'][] = [['text' => $textbotlang['users']['backbtn'], 'callback_data' => "backuser"]];
+        rx_section_media_enter('test', $from_id, $datain, $message_id, ['usertestbtn']);
         sendmessage($from_id, $datatextbot['textselectlocation'], json_encode($rxTestEntryKb), 'html');
     }
 }

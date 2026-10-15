@@ -1320,7 +1320,7 @@ function processKeyboardStyles($keyboard, $rxPlainAdmin = false) {
             'recheckcrypto','rcc_pick_','rcc_skip_photo','rcc_cancel','rcc_resubmit_',
             'Discount','Add_Balance','backuser','backorder','account','rw_pick_','rw_custom','confirmandgetserviceDiscount','aptdc',
             'ticketnew','ticketopen_','ticketmsg_','ticketclose_','tk_cnt_','tk_album_','tk_cancel','tk_media_yes','tk_media_no','departman_','supporttickets','helpos_',
-            'wheel_luck','affiliatesbtn','agentpanel','requestagent','supportbtns','helpbtns','usertestbtn','extendbtn',
+            'wheel_luck','affiliatesbtn','agentpanel','requestagent','supportbtns','helpbtns','helpmenubtn','myservicesbtn','accountbtn','usertestbtn','extendbtn',
             'my_miniapp_pending','location_','buyback','ticketclose_',
             'gen_random_uname',
             'nmstocksel_','nmstockextend_','nmstockrefund_','nmstockcfg_','nmstocksub_',

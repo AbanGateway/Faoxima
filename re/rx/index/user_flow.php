@@ -100,6 +100,9 @@ if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $data
         sendmessage($from_id, $rxTestQuota['reason'] === 'audience_restricted' ? rx_test_audience_denied_text() : $textbotlang['users']['usertest']['limitwarning'], $keyboard_buy, 'html');
         return;
     }
+    if ($user['step'] != "createusertest" && strpos((string) $datain, 'locationtest_') !== 0) {
+        rx_section_media_enter('test', $from_id, $datain, $message_id, ['usertestbtn']);
+    }
     $location = $marzban_list_get['code_panel'];
     $_rx_usernameKb = ($marzban_list_get['MethodUsername'] == "نام کاربری دلخواه + عدد رندوم" || $marzban_list_get['MethodUsername'] == "متن دلخواه کاربر + رندوم") ? $usernamePromptKb : $backuser;
     if ($marzban_list_get['MethodUsername'] == $textbotlang['users']['customusername'] || $marzban_list_get['MethodUsername'] == "نام کاربری دلخواه + عدد رندوم" || $marzban_list_get['MethodUsername'] == "متن دلخواه کاربر + رندوم") {
@@ -267,14 +270,15 @@ if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $data
             'reply_markup' => $Response
         ]);
     }
-} elseif (($text !== '' && $text == $datatextbot['text_help']) || $datain == "helpbtn" || $datain == "helpbtns" || $text == "/help" || $text == "help") {
+} elseif (($text !== '' && $text == $datatextbot['text_help']) || $datain == "helpbtn" || $datain == "helpbtns" || $datain == "helpmenubtn" || $text == "/help" || $text == "help") {
     if (!check_active_btn($setting['keyboardmain'], "text_help")) {
         sendmessage($from_id, $textbotlang['users']['help']['disablehelp'], null, 'HTML');
         return;
     }
+    rx_section_media_enter('help', $from_id, $datain, $message_id, ['helpmenubtn'], ['helpmenubtn']);
     if ($setting['categoryhelp'] == "1") {
         $rxSelectCategoryTxt = $datatextbot['dyn_tickets_select_category'] ?? "📌 یک دسته را انتخاب نمایید";
-        if ($datain == "helpbtns") {
+        if ($datain == "helpbtns" || $datain == "helpmenubtn") {
             Editmessagetext($from_id, $message_id, $rxSelectCategoryTxt, $json_list_helpـcategory, 'HTML');
         } else {
             sendmessage($from_id, $rxSelectCategoryTxt, $json_list_helpـcategory, 'HTML');
@@ -292,7 +296,7 @@ if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $data
             rx_kb_style(['text' => $textbotlang['users']['backmenu'], 'callback_data' => "backuser"], 'backuser', $_rx_nav_s),
         ];
         $json_list_help = json_encode($helpidos);
-        if ($datain == "helpbtns") {
+        if ($datain == "helpbtns" || $datain == "helpmenubtn") {
             Editmessagetext($from_id, $message_id, $textbotlang['users']['selectoption'], $json_list_help, 'HTML');
         } else {
             sendmessage($from_id, $textbotlang['users']['selectoption'], $json_list_help, 'HTML');
@@ -392,6 +396,7 @@ if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $data
         sendmessage($from_id, $datatextbot['dyn_errors_button_disabled'] ?? "❌ این دکمه غیرفعال می باشد", null, 'HTML');
         return;
     }
+    rx_section_media_enter('support', $from_id, $datain, $message_id, ['supportbtns'], ['supportbtns']);
     if ($datain == "supportbtns") {
         Editmessagetext($from_id, $message_id, $textbotlang['users']['support']['btnsupport'], $supportoption);
     } else {
@@ -719,7 +724,8 @@ if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $data
     Editmessagetext($from_id, $message_id, $mpText, $mpKb);
 } elseif ($datain == "fqQuestions") {
     sendmessage($from_id, $datatextbot['text_dec_fq'], null, 'HTML');
-} elseif (($text !== '' && $text == $datatextbot['accountwallet']) || $datain == "account" || $text == "/wallet") {
+} elseif (($text !== '' && $text == $datatextbot['accountwallet']) || $datain == "account" || $datain == "accountbtn" || $text == "/wallet") {
+    rx_section_media_enter('wallet', $from_id, $datain, $message_id, ['accountbtn'], ['accountbtn']);
     $dateacc = jdate('Y/m/d');
     $current_time = time();
     $timeacc = jdate('H:i:s', $current_time);
@@ -816,7 +822,7 @@ https://t.me/$usernamebot?start={$user['codeInvitation']}";
         ]);
     }
     $activeKeyboard = json_encode($kbData, JSON_UNESCAPED_UNICODE);
-    if ($datain == "account") {
+    if ($datain == "account" || $datain == "accountbtn") {
         Editmessagetext($from_id, $message_id, $text_account, $activeKeyboard);
     } else {
         sendmessage($from_id, $text_account, $activeKeyboard, 'HTML');
@@ -1081,6 +1087,9 @@ https://t.me/$usernamebot?start={$user['codeInvitation']}";
         sendmessage($from_id, $datatextbot['dyn_errors_button_disabled'] ?? "❌ این دکمه غیرفعال می باشد", null, 'HTML');
         return;
     }
+    if ($datain != "buyback") {
+        rx_section_media_enter('buy', $from_id, $datain, $message_id, ['buy'], ['buy']);
+    }
     if ($datain == "buy") {
         Editmessagetext($from_id, $message_id, $textbotlang['users']['sell']['notestep'], $backuser);
     } elseif ($datain == "buyback") {
@@ -1107,6 +1116,9 @@ https://t.me/$usernamebot?start={$user['codeInvitation']}";
     }
     if ($user['number'] == "none" && (($setting['get_number'] == "onAuthenticationphone") || ($setting['iran_number'] == "onAuthenticationiran")) && !rx_auth_skip_user($user))
         return;
+    if ($user['step'] != "statusnamecustom" && $datain != "buybacktow" && $datain != "buyback") {
+        rx_section_media_enter('buy', $from_id, $datain, $message_id, ['buy'], ['buy']);
+    }
 
     if (!isset($datatextbot['textselectlocation']) || trim((string)$datatextbot['textselectlocation']) === '') {
         $datatextbot['textselectlocation'] = '📍 لطفاً لوکیشن (سرور) مورد نظر را انتخاب کنید:';

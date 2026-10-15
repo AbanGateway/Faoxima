@@ -246,7 +246,7 @@ if ($setting['inlinebtnmain'] == "oninline" && !empty($keyboardRows)) {
                 $trace_keyboard[$key][$keyboard_key]['_rxsk'] = "home_buy";
             }
             if ($keyboard['text'] == "accountwallet") {
-                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "account";
+                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "accountbtn";
                 $trace_keyboard[$key][$keyboard_key]['_rxsk'] = "home_account";
             }
             if ($keyboard['text'] == "text_Tariff_list") {
@@ -266,11 +266,12 @@ if ($setting['inlinebtnmain'] == "oninline" && !empty($keyboardRows)) {
                 $trace_keyboard[$key][$keyboard_key]['callback_data'] = "supportbtns";
             }
             if ($keyboard['text'] == "text_Purchased_services") {
-                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "backorder";
+                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "myservicesbtn";
                 $trace_keyboard[$key][$keyboard_key]['_rxsk'] = "home_myservices";
             }
             if ($keyboard['text'] == "text_help") {
-                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "helpbtns";
+                $trace_keyboard[$key][$keyboard_key]['callback_data'] = "helpmenubtn";
+                $trace_keyboard[$key][$keyboard_key]['_rxsk'] = "helpbtns";
             }
             if ($keyboard['text'] == "text_usertest") {
                 $trace_keyboard[$key][$keyboard_key]['callback_data'] = "usertestbtn";

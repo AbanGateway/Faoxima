@@ -1154,6 +1154,7 @@ if (preg_match('/^sendresidcart-(.*)/', $datain, $dataget)) {
         ]);
     }
 } elseif (($text !== '' && $text == $datatextbot['text_Tariff_list']) || $datain == "Tariff_list") {
+    rx_section_media_enter('tariff', $from_id, $datain, $message_id, ['Tariff_list']);
     sendmessage($from_id, $datatextbot['text_dec_Tariff_list'], null, 'HTML');
 } elseif ($datain == "colselist") {
     deletemessage($from_id, $message_id);
@@ -1764,6 +1765,7 @@ $text_porsant
         sendmessage($from_id, $textbotlang['users']['extend']['emptyServiceforExtend'], null, 'html');
         return;
     }
+    rx_section_media_enter('extend', $from_id, $datain, $message_id, ['extendbtn']);
     $pages = 1;
     update("user", "pagenumber", $pages, "id", $from_id);
     $page = 1;

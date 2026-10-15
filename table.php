@@ -3710,6 +3710,19 @@ try {
 }
 
 try {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS section_media (
+        section_id VARCHAR(32) NOT NULL PRIMARY KEY,
+        media_status VARCHAR(20) NULL DEFAULT '0',
+        media_type VARCHAR(32) NULL DEFAULT '',
+        media_file_id VARCHAR(512) NULL DEFAULT '',
+        media_text VARCHAR(255) NULL DEFAULT '',
+        media_entities TEXT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+} catch (Exception $e) {
+    file_put_contents('error_log', '[table.php section media table] ' . $e->getMessage() . "\n", FILE_APPEND);
+}
+
+try {
     $connect->query("DELETE FROM textbot WHERE id_text IN ('miniapp_suggest_2','miniapp_suggest_3','miniapp_suggest_4')");
 } catch (Exception $e) {}
 

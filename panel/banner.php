@@ -118,6 +118,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['_save'])) {
                 $upd = $pdo->prepare($statusSql);
                 $upd->bindValue(':v', $newStatus, PDO::PARAM_STR);
                 $upd->execute();
+                if ($key === 'buy' && $newStatus === '1') {
+                    try {
+                        $pdo->exec("UPDATE section_media SET media_status = '0' WHERE section_id = 'buy'");
+                    } catch (\Throwable $mediaError) {
+                        error_log('[panel/banner] buy media exclusion failed: ' . $mediaError->getMessage());
+                    }
+                }
                 $savedCount++;
             } catch (\Throwable $e) {
                 error_log('[panel/banner] ' . $statusCol . ' failed: ' . $e->getMessage());

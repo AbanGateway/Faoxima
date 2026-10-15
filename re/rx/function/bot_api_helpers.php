@@ -279,34 +279,112 @@ function rx_start_media_build_config($type, $fileId, $text, $entities)
     }
     return ['type' => 'custom_emoji', 'file_id' => '', 'text' => $text, 'entities' => $normalizedEntities];
 }
-function rx_start_media_stored_config($settingRow = null)
+function rx_section_media_sections()
 {
-    if ($settingRow === null) {
-        $settingRow = $GLOBALS['setting'] ?? null;
+    return [
+        'start' => '🚀 استارت (/start)',
+        'buy' => '🔐 خرید اشتراک',
+        'extend' => '♻️ تمدید سرویس',
+        'test' => '🔑 اکانت تست',
+        'services' => '🛍 سرویس‌های من',
+        'wallet' => '🏦 کیف پول + شارژ',
+        'support' => '📞 پشتیبانی',
+        'tariff' => '💵 تعرفه اشتراک',
+        'help' => '📚 آموزش',
+    ];
+}
+function rx_section_media_is_valid_section($section)
+{
+    return is_string($section) && array_key_exists($section, rx_section_media_sections());
+}
+function rx_section_media_empty_row()
+{
+    return ['status' => '0', 'type' => '', 'file_id' => '', 'text' => '', 'entities' => ''];
+}
+function rx_section_media_table_rows($refresh = false)
+{
+    global $pdo;
+    static $rows = null;
+    if ($refresh) {
+        $rows = null;
     }
-    if (!is_array($settingRow)) {
+    if ($rows !== null) {
+        return $rows;
+    }
+    if (!($pdo instanceof PDO)) {
+        return [];
+    }
+    $rows = [];
+    try {
+        $stmt = $pdo->query("SELECT section_id, media_status, media_type, media_file_id, media_text, media_entities FROM section_media");
+        foreach (($stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : []) as $record) {
+            $rows[(string)$record['section_id']] = [
+                'status' => (string)($record['media_status'] ?? '0'),
+                'type' => (string)($record['media_type'] ?? ''),
+                'file_id' => (string)($record['media_file_id'] ?? ''),
+                'text' => (string)($record['media_text'] ?? ''),
+                'entities' => (string)($record['media_entities'] ?? ''),
+            ];
+        }
+    } catch (\Throwable $tableError) {
+        rx_start_media_log('section table read failed: ' . $tableError->getMessage());
+    }
+    return $rows;
+}
+function rx_section_media_row($section, $settingRow = null, $refresh = false)
+{
+    if (!rx_section_media_is_valid_section($section)) {
         return null;
     }
-    return rx_start_media_build_config(
-        $settingRow['start_media_type'] ?? '',
-        $settingRow['start_media_file_id'] ?? '',
-        $settingRow['start_media_text'] ?? '',
-        $settingRow['start_media_entities'] ?? ''
-    );
+    if ($section === 'start') {
+        if ($settingRow === null) {
+            $settingRow = $GLOBALS['setting'] ?? null;
+        }
+        if (!is_array($settingRow)) {
+            return null;
+        }
+        return [
+            'status' => (string)($settingRow['start_media_status'] ?? '0'),
+            'type' => (string)($settingRow['start_media_type'] ?? ''),
+            'file_id' => (string)($settingRow['start_media_file_id'] ?? ''),
+            'text' => (string)($settingRow['start_media_text'] ?? ''),
+            'entities' => (string)($settingRow['start_media_entities'] ?? ''),
+        ];
+    }
+    $rows = rx_section_media_table_rows($refresh);
+    return $rows[$section] ?? rx_section_media_empty_row();
+}
+function rx_section_media_stored_config($section, $settingRow = null, $refresh = false)
+{
+    $row = rx_section_media_row($section, $settingRow, $refresh);
+    if ($row === null) {
+        return null;
+    }
+    return rx_start_media_build_config($row['type'], $row['file_id'], $row['text'], $row['entities']);
+}
+function rx_section_media_is_enabled($section, $settingRow = null, $refresh = false)
+{
+    $row = rx_section_media_row($section, $settingRow, $refresh);
+    return $row !== null && $row['status'] === '1';
+}
+function rx_section_media_active_config($section, $settingRow = null, $refresh = false)
+{
+    if (!rx_section_media_is_enabled($section, $settingRow, $refresh)) {
+        return null;
+    }
+    return rx_section_media_stored_config($section, $settingRow, $refresh);
+}
+function rx_start_media_stored_config($settingRow = null)
+{
+    return rx_section_media_stored_config('start', $settingRow);
 }
 function rx_start_media_is_enabled($settingRow = null)
 {
-    if ($settingRow === null) {
-        $settingRow = $GLOBALS['setting'] ?? null;
-    }
-    return is_array($settingRow) && (string)($settingRow['start_media_status'] ?? '0') === '1';
+    return rx_section_media_is_enabled('start', $settingRow);
 }
 function rx_start_media_active_config($settingRow = null)
 {
-    if (!rx_start_media_is_enabled($settingRow)) {
-        return null;
-    }
-    return rx_start_media_stored_config($settingRow);
+    return rx_section_media_active_config('start', $settingRow);
 }
 function rx_start_media_parse_message($message)
 {
@@ -385,10 +463,10 @@ function rx_start_media_dispatch($chat_id, array $config)
     }
     return ['ok' => false, 'description' => 'unsupported start media type'];
 }
-function rx_send_start_media($chat_id)
+function rx_section_media_send($section, $chat_id)
 {
     try {
-        $config = rx_start_media_active_config();
+        $config = rx_section_media_active_config($section);
         if ($config === null) {
             return false;
         }
@@ -397,9 +475,41 @@ function rx_send_start_media($chat_id)
             return true;
         }
         $description = is_array($result) ? (string)($result['description'] ?? 'unknown error') : 'no response';
-        rx_start_media_log('send ' . $config['type'] . ' failed: ' . $description);
+        rx_start_media_log($section . ' send ' . $config['type'] . ' failed: ' . $description);
     } catch (\Throwable $startMediaError) {
-        rx_start_media_log('send exception: ' . $startMediaError->getMessage());
+        rx_start_media_log($section . ' send exception: ' . $startMediaError->getMessage());
+    }
+    return false;
+}
+function rx_send_start_media($chat_id)
+{
+    return rx_section_media_send('start', $chat_id);
+}
+function rx_section_media_enter($section, $chat_id, &$datain, $message_id = 0, array $entryCallbacks = [], array $editCallbacks = [])
+{
+    static $handled = [];
+    try {
+        if (isset($handled[$section])) {
+            return false;
+        }
+        $callback = is_string($datain) ? $datain : '';
+        if ($callback !== '' && !in_array($callback, $entryCallbacks, true)) {
+            return false;
+        }
+        if (rx_section_media_active_config($section) === null) {
+            return false;
+        }
+        $handled[$section] = true;
+        if (!rx_section_media_send($section, $chat_id)) {
+            return false;
+        }
+        if ($callback !== '' && in_array($callback, $editCallbacks, true) && (int)$message_id > 0) {
+            deletemessage($chat_id, $message_id);
+            $datain = 'rx_media_entry';
+        }
+        return true;
+    } catch (\Throwable $entryError) {
+        rx_start_media_log($section . ' entry hook failed: ' . $entryError->getMessage());
     }
     return false;
 }
@@ -408,7 +518,17 @@ function rx_buy_banner_file_id()
     global $setting;
     $status = is_array($setting) ? ($setting['banner_buy_status'] ?? '0') : '0';
     $fileId = is_array($setting) ? trim((string)($setting['banner_buy_file_id'] ?? '')) : '';
-    return ($status == '1' && $fileId !== '') ? $fileId : '';
+    if ($status != '1' || $fileId === '') {
+        return '';
+    }
+    try {
+        if (rx_section_media_active_config('buy') !== null) {
+            return '';
+        }
+    } catch (\Throwable $buyMediaError) {
+        rx_start_media_log('buy exclusion check failed: ' . $buyMediaError->getMessage());
+    }
+    return $fileId;
 }
 function rx_send_buy_first_step($chat_id, $message_id, $datain, $text, $keyboard, $isCallback)
 {
