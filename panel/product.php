@@ -10,6 +10,7 @@ require_once __DIR__ . '/lib/search_filter.php';
 require_once __DIR__ . '/lib/compact_badges.php';
 require_once __DIR__ . '/lib/csrf.php';
 require_once __DIR__ . '/lib/ordering.php';
+require_once __DIR__ . '/lib/bulk_price.php';
 require_once __DIR__ . '/../function.php';
 if (!function_exists('xui_fail2ban_status') && is_file(__DIR__ . '/../x-ui_single.php')) {
     require_once __DIR__ . '/../x-ui_single.php';
@@ -204,6 +205,7 @@ if (isset($_GET['removeid']) && $_GET['removeid'] !== '') {
     <title>مدیریت محصولات | ربات فاکسیما</title>
     <link rel="stylesheet" href="css/theme.css?v=flat50">
     <link rel="stylesheet" href="css/order_modal.css?v=ord1">
+    <link rel="stylesheet" href="css/bulk_price.css?v=bp5">
 <script src="js/money-input.js?v=fx1" defer></script>
 <script src="js/theme.js?v=flat50" defer>
 
@@ -234,6 +236,9 @@ if (isset($_GET['removeid']) && $_GET['removeid'] !== '') {
                     </button>
                     <button onclick="openModal('modal-move-panel')" class="btn btn-soft-purple btn-sm">
                         <?php echo icon('arrow-right-arrow-left', 'svg-icon'); ?> جابجایی پنل‌ها
+                    </button>
+                    <button type="button" data-bp-open="modal-bulk-price" class="btn btn-soft-purple btn-sm">
+                        <?php echo icon('coins', 'svg-icon'); ?> قیمت گروهی
                     </button>
                 </div>
             </div>
@@ -438,6 +443,7 @@ if (isset($_GET['removeid']) && $_GET['removeid'] !== '') {
 
 <?php echo fx_order_modal_html('product', 'modal-move-product'); ?>
 <?php echo fx_order_modal_html('panel', 'modal-move-panel'); ?>
+<?php echo fx_bp_modal_html('modal-bulk-price'); ?>
 
 
 <div id="modal-clone-product" class="modal-overlay">
@@ -535,6 +541,7 @@ if (isset($_GET['removeid']) && $_GET['removeid'] !== '') {
 <script src="js/bulk-select.js?v=fx2"></script>
 <script src="js/compact-badges.js?v=fx1"></script>
 <script src="js/order_modal.js?v=ord1"></script>
+<script src="js/bulk_price.js?v=bp4"></script>
 <script>
   var faoximaPanelTypeMap = <?php echo json_encode($panelTypeMap, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
   function faoximaToggleAll(master, formId) {
