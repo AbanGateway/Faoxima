@@ -798,24 +798,20 @@ if (false) {
         step('PanelMenu', $from_id);
         return;
     }
-    $services = $servicesResponse['services'];
     $currentServiceId = trim((string) ($panel['rebecca_service_id'] ?? ''));
-    $rebeccaServiceRows = [];
-    foreach ($services as $serviceRow) {
-        if (!isset($serviceRow['id'])) {
-            continue;
-        }
-        $serviceId = (string) intval($serviceRow['id']);
-        $isSelected = ($currentServiceId === $serviceId);
-        $checkIcon = $isSelected ? '✅' : '❌';
-        $rebeccaServiceRows[] = [[
-            'text' => rebeccaServiceLabel($serviceRow) . " {$checkIcon}",
-            'callback_data' => 'rebeccasetservice#' . $serviceId,
-        ]];
+    $rebeccaServiceView = rebeccaBuildServiceKeyboard($servicesResponse['services'], $currentServiceId, 1);
+    if ($rebeccaServiceView === null) {
+        outtypepanel("rebecca", "❌ دریافت سرویس‌ها از Rebecca ناموفق بود: لیست سرویس‌ها خالی است.");
+        step('PanelMenu', $from_id);
+        return;
     }
-    $rebeccaServiceKeyboard = json_encode(['inline_keyboard' => $rebeccaServiceRows], JSON_UNESCAPED_UNICODE);
-    nm_adminInstantReply($from_id, "⚙️ سرویس پیش‌فرض فعلی را انتخاب کنید. با هر بار ضربه زدن روی یک سرویس، همان سرویس به‌عنوان پیش‌فرض ذخیره می‌شود.", $rebeccaServiceKeyboard, 'HTML');
-} elseif (preg_match('/^rebeccasetservice#(\d+)$/', $datain, $rebeccaServiceMatch)) {
+    nm_adminInstantReply($from_id, "⚙️ سرویس پیش‌فرض فعلی را انتخاب کنید. با هر بار ضربه زدن روی یک سرویس، همان سرویس به‌عنوان پیش‌فرض ذخیره می‌شود.", $rebeccaServiceView['keyboard'], 'HTML');
+} elseif ($datain === 'rebeccaservicenoop') {
+    telegram('answerCallbackQuery', [
+        'callback_query_id' => $callback_query_id,
+        'cache_time' => 3,
+    ]);
+} elseif (preg_match('/^rebeccaservicepage#(\d+)$/', $datain, $rebeccaServiceMatch)) {
     $panelName = guardResolveUserPanelName($user);
     $panel = $panelName ? select("marzban_panel", "*", "name_panel", $panelName, "select") : null;
     if (!is_array($panel) || ($panel['type'] ?? null) != "rebecca") {
@@ -827,26 +823,69 @@ if (false) {
         ]);
         return;
     }
-    $chosenServiceId = $rebeccaServiceMatch[1];
-    update("marzban_panel", "rebecca_service_id", $chosenServiceId, "name_panel", $panel['name_panel']);
     $servicesResponse = rebeccaGetServices($panel['name_panel']);
-    $services = ($servicesResponse['status'] !== false) ? $servicesResponse['services'] : [];
-    $rebeccaServiceRows = [];
-    foreach ($services as $serviceRow) {
-        if (!isset($serviceRow['id'])) {
-            continue;
-        }
-        $serviceId = (string) intval($serviceRow['id']);
-        $isSelected = ($chosenServiceId === $serviceId);
-        $checkIcon = $isSelected ? '✅' : '❌';
-        $rebeccaServiceRows[] = [[
-            'text' => rebeccaServiceLabel($serviceRow) . " {$checkIcon}",
-            'callback_data' => 'rebeccasetservice#' . $serviceId,
-        ]];
+    $rebeccaServiceView = ($servicesResponse['status'] !== false && is_array($servicesResponse['services'] ?? null))
+        ? rebeccaBuildServiceKeyboard($servicesResponse['services'], $panel['rebecca_service_id'] ?? '', (int) $rebeccaServiceMatch[1])
+        : null;
+    if ($rebeccaServiceView === null) {
+        telegram('answerCallbackQuery', [
+            'callback_query_id' => $callback_query_id,
+            'text' => 'دریافت لیست سرویس‌ها ناموفق بود. دوباره تلاش کنید.',
+            'show_alert' => true,
+            'cache_time' => 0,
+        ]);
+        return;
     }
-    $rebeccaServiceKeyboard = json_encode(['inline_keyboard' => $rebeccaServiceRows], JSON_UNESCAPED_UNICODE);
     if (!empty($message_id)) {
-        Editmessagetext($from_id, $message_id, "⚙️ سرویس پیش‌فرض فعلی را انتخاب کنید. با هر بار ضربه زدن روی یک سرویس، همان سرویس به‌عنوان پیش‌فرض ذخیره می‌شود.", $rebeccaServiceKeyboard, 'HTML');
+        Editmessagetext($from_id, $message_id, "⚙️ سرویس پیش‌فرض فعلی را انتخاب کنید. با هر بار ضربه زدن روی یک سرویس، همان سرویس به‌عنوان پیش‌فرض ذخیره می‌شود.", $rebeccaServiceView['keyboard'], 'HTML');
+    }
+    telegram('answerCallbackQuery', [
+        'callback_query_id' => $callback_query_id,
+        'cache_time' => 0,
+    ]);
+} elseif (preg_match('/^rebeccasetservice#(\d+)(?:#(\d+))?$/', $datain, $rebeccaServiceMatch)) {
+    $panelName = guardResolveUserPanelName($user);
+    $panel = $panelName ? select("marzban_panel", "*", "name_panel", $panelName, "select") : null;
+    if (!is_array($panel) || ($panel['type'] ?? null) != "rebecca") {
+        telegram('answerCallbackQuery', [
+            'callback_query_id' => $callback_query_id,
+            'text' => 'اطلاعات پنل در دسترس نیست.',
+            'show_alert' => true,
+            'cache_time' => 3,
+        ]);
+        return;
+    }
+    $chosenServiceId = (string) intval($rebeccaServiceMatch[1]);
+    $rebeccaServicePage = isset($rebeccaServiceMatch[2]) ? (int) $rebeccaServiceMatch[2] : 1;
+    $servicesResponse = rebeccaGetServices($panel['name_panel']);
+    $rebeccaServiceView = ($servicesResponse['status'] !== false && is_array($servicesResponse['services'] ?? null))
+        ? rebeccaBuildServiceKeyboard($servicesResponse['services'], $chosenServiceId, $rebeccaServicePage)
+        : null;
+    if ($rebeccaServiceView === null) {
+        telegram('answerCallbackQuery', [
+            'callback_query_id' => $callback_query_id,
+            'text' => 'دریافت لیست سرویس‌ها ناموفق بود؛ سرویس پیش‌فرض تغییر نکرد.',
+            'show_alert' => true,
+            'cache_time' => 0,
+        ]);
+        return;
+    }
+    if (!in_array($chosenServiceId, $rebeccaServiceView['ids'], true)) {
+        $rebeccaServiceView = rebeccaBuildServiceKeyboard($servicesResponse['services'], $panel['rebecca_service_id'] ?? '', $rebeccaServicePage);
+        if (!empty($message_id)) {
+            Editmessagetext($from_id, $message_id, "⚙️ سرویس پیش‌فرض فعلی را انتخاب کنید. با هر بار ضربه زدن روی یک سرویس، همان سرویس به‌عنوان پیش‌فرض ذخیره می‌شود.", $rebeccaServiceView['keyboard'], 'HTML');
+        }
+        telegram('answerCallbackQuery', [
+            'callback_query_id' => $callback_query_id,
+            'text' => 'این سرویس دیگر وجود ندارد؛ فهرست به‌روزرسانی شد.',
+            'show_alert' => true,
+            'cache_time' => 0,
+        ]);
+        return;
+    }
+    update("marzban_panel", "rebecca_service_id", $chosenServiceId, "name_panel", $panel['name_panel']);
+    if (!empty($message_id)) {
+        Editmessagetext($from_id, $message_id, "⚙️ سرویس پیش‌فرض فعلی را انتخاب کنید. با هر بار ضربه زدن روی یک سرویس، همان سرویس به‌عنوان پیش‌فرض ذخیره می‌شود.", $rebeccaServiceView['keyboard'], 'HTML');
     }
     telegram('answerCallbackQuery', [
         'callback_query_id' => $callback_query_id,

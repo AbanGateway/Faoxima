@@ -222,6 +222,63 @@ function rebeccaServiceLabel(array $service)
     return "service-{$id}";
 }
 
+function rebeccaUsableServices(array $services)
+{
+    $usable = [];
+    foreach ($services as $serviceRow) {
+        if (!is_array($serviceRow) || !isset($serviceRow['id']) || !is_numeric($serviceRow['id']) || intval($serviceRow['id']) <= 0) {
+            continue;
+        }
+        $usable[intval($serviceRow['id'])] = $serviceRow;
+    }
+    return array_values($usable);
+}
+
+function rebeccaBuildServiceKeyboard(array $services, $currentServiceId, $page = 1, $perPage = 5)
+{
+    $usable = rebeccaUsableServices($services);
+    $total = count($usable);
+    if ($total === 0) {
+        return null;
+    }
+    $perPage = max(1, intval($perPage));
+    $pages = (int) ceil($total / $perPage);
+    $page = min(max(1, intval($page)), $pages);
+    $currentServiceId = trim((string) $currentServiceId);
+    $rows = [];
+    foreach (array_slice($usable, ($page - 1) * $perPage, $perPage) as $serviceRow) {
+        $serviceId = (string) intval($serviceRow['id']);
+        $checkIcon = ($currentServiceId === $serviceId) ? '✅' : '❌';
+        $callback = 'rebeccasetservice#' . $serviceId;
+        if ($pages > 1) {
+            $callback .= '#' . $page;
+        }
+        $rows[] = [[
+            'text' => rebeccaServiceLabel($serviceRow) . " {$checkIcon}",
+            'callback_data' => $callback,
+        ]];
+    }
+    if ($pages > 1) {
+        $nav = [];
+        if ($page > 1) {
+            $nav[] = ['text' => '◀️ قبلی', 'callback_data' => 'rebeccaservicepage#' . ($page - 1)];
+        }
+        $nav[] = ['text' => "{$page} / {$pages}", 'callback_data' => 'rebeccaservicenoop'];
+        if ($page < $pages) {
+            $nav[] = ['text' => 'بعدی ▶️', 'callback_data' => 'rebeccaservicepage#' . ($page + 1)];
+        }
+        $rows[] = $nav;
+    }
+    return [
+        'keyboard' => json_encode(['inline_keyboard' => $rows], JSON_UNESCAPED_UNICODE),
+        'page' => $page,
+        'pages' => $pages,
+        'ids' => array_map(function ($row) {
+            return (string) intval($row['id']);
+        }, $usable),
+    ];
+}
+
 function rebeccaResolveServiceId($namePanel, $serviceValue = null)
 {
     $serviceValue = is_string($serviceValue) ? trim($serviceValue) : $serviceValue;
