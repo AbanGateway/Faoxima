@@ -413,6 +413,16 @@ final class PaymentInitHandler extends BaseHandler
                 $stale[] = (string)$r['id_order'];
             }
         }
+        if ($method === 'tonpay' && function_exists('tonpayCustomPurgeProtected')) {
+            $stale = array_values(array_filter($stale, static function ($staleOrderId) {
+                return !tonpayCustomPurgeProtected($staleOrderId);
+            }));
+        }
+        if ($method === 'atlaspay' && function_exists('atlaspayCustomPurgeProtected')) {
+            $stale = array_values(array_filter($stale, static function ($staleOrderId) {
+                return !atlaspayCustomPurgeProtected($staleOrderId);
+            }));
+        }
         if (empty($stale)) return;
 
         try {
@@ -789,6 +799,9 @@ final class PaymentInitHandler extends BaseHandler
         }
 
         update('Payment_report', 'dec_not_confirmed', $token, 'id_order', $orderId);
+        if (function_exists('tronadoV2Store')) {
+            tronadoV2Store($orderId, $pay);
+        }
         update('Payment_report', 'tronado_payment_url', $paymentUrl, 'id_order', $orderId);
 
         FaoximaResponse::ok([
@@ -815,6 +828,11 @@ final class PaymentInitHandler extends BaseHandler
         }
         if ($max > 0 && $amount > $max) {
             FaoximaResponse::fail(422, faoxima_render_text(faoxima_textbot_get('dyn_paymentinit_max_amount', '❌ حداکثر مبلغ پرداخت {max} تومان است.'), ['max' => number_format($max)]));
+        }
+
+        if (tonpayPaymentMode() === 'custom') {
+            $this->handleTonPayCustom($amount);
+            return;
         }
 
         $orderId = bin2hex(random_bytes(5));
@@ -852,6 +870,85 @@ final class PaymentInitHandler extends BaseHandler
     }
 
 
+    private function handleTonPayCustom(int $amount): void
+    {
+        if (!function_exists('tonpayCustomCreateInvoice')) {
+            FaoximaResponse::fail(503, faoxima_textbot_get('dyn_paymentinit_tonpay_function_missing', '❌ تابع درگاه تون‌پی روی این سرور موجود نیست.'));
+        }
+
+        $orderId = bin2hex(random_bytes(5));
+        $this->insertPaymentReport('tonpay', $amount, $orderId);
+
+        try {
+            $invoice = tonpayCustomCreateInvoice($orderId, $amount, (int)$this->user['id']);
+        } catch (Throwable $e) {
+            FaoximaLogger::userFacing('tonpayCustomCreateInvoice() threw', ['err' => $e->getMessage()]);
+            update('Payment_report', 'payment_Status', 'reject', 'id_order', $orderId);
+            FaoximaResponse::fail(502, faoxima_textbot_get('dyn_paymentinit_gateway_generic_error', '❌ خطا در ارتباط با درگاه پرداخت.'));
+        }
+
+        if (!is_array($invoice) || (isset($invoice['success']) && $invoice['success'] === false)) {
+            $errorCode = is_array($invoice) ? (string)($invoice['error_code'] ?? '') : '';
+            FaoximaLogger::userFacing('tonpayCustomCreateInvoice() returned bad response', ['code' => $errorCode]);
+            update('Payment_report', 'payment_Status', 'reject', 'id_order', $orderId);
+            update('Payment_report', 'dec_not_confirmed', 'tonpay_custom_create_failed:' . $errorCode, 'id_order', $orderId);
+            FaoximaResponse::fail(502, faoxima_textbot_get('dyn_paymentinit_payment_link_creation_failed', '❌ ساخت لینک پرداخت ناموفق بود. لطفاً دوباره تلاش کنید.'));
+        }
+
+        if (!tonpayCustomStoreInvoice($orderId, $invoice)) {
+            update('Payment_report', 'payment_Status', 'reject', 'id_order', $orderId);
+            FaoximaResponse::fail(502, faoxima_textbot_get('dyn_paymentinit_payment_record_failed', '❌ ثبت درخواست پرداخت ناموفق بود. لطفاً دوباره تلاش کنید.'));
+        }
+
+        $report = tonpayCustomFetchReport($orderId);
+        FaoximaResponse::ok([
+            'kind'     => 'tonpay_custom',
+            'order_id' => $orderId,
+            'view'     => $report === null ? null : tonpayCustomPublicView($report),
+        ]);
+    }
+
+
+    private function handleAtlasPayCustom(int $amount): void
+    {
+        if (!function_exists('atlaspayCustomCreateOrder')) {
+            FaoximaResponse::fail(503, faoxima_textbot_get('dyn_paymentinit_atlaspay_function_missing', '❌ تابع درگاه اطلس‌پی روی این سرور موجود نیست.'));
+        }
+
+        $orderId = bin2hex(random_bytes(5));
+        $this->insertPaymentReport('atlaspay', $amount, $orderId);
+
+        try {
+            $order = atlaspayCustomCreateOrder($orderId, $amount, (int)$this->user['id']);
+        } catch (Throwable $e) {
+            FaoximaLogger::userFacing('atlaspayCustomCreateOrder() threw', ['err' => $e->getMessage()]);
+            update('Payment_report', 'payment_Status', 'reject', 'id_order', $orderId);
+            FaoximaResponse::fail(502, faoxima_textbot_get('dyn_paymentinit_gateway_generic_error', '❌ خطا در ارتباط با درگاه پرداخت.'));
+        }
+
+        if (!is_array($order) || (isset($order['success']) && $order['success'] === false)) {
+            $errorCode = is_array($order) ? (string)($order['error_code'] ?? '') : '';
+            FaoximaLogger::userFacing('atlaspayCustomCreateOrder() returned bad response', ['code' => $errorCode]);
+            update('Payment_report', 'payment_Status', 'reject', 'id_order', $orderId);
+            update('Payment_report', 'dec_not_confirmed', 'atlaspay_custom_create_failed:' . $errorCode, 'id_order', $orderId);
+            FaoximaResponse::fail(502, faoxima_textbot_get('dyn_paymentinit_payment_link_creation_failed', '❌ ساخت لینک پرداخت ناموفق بود. لطفاً دوباره تلاش کنید.'));
+        }
+
+        if (!atlaspayCustomStoreOrder($orderId, $order)) {
+            atlaspayCancelOrder((string)$order['orderId']);
+            update('Payment_report', 'payment_Status', 'reject', 'id_order', $orderId);
+            FaoximaResponse::fail(502, faoxima_textbot_get('dyn_paymentinit_payment_record_failed', '❌ ثبت درخواست پرداخت ناموفق بود. لطفاً دوباره تلاش کنید.'));
+        }
+
+        $report = atlaspayCustomFetchReport($orderId);
+        FaoximaResponse::ok([
+            'kind'     => 'atlaspay_custom',
+            'order_id' => $orderId,
+            'view'     => $report === null ? null : atlaspayCustomPublicView($report),
+        ]);
+    }
+
+
     private function handleAtlasPay(int $amount): void
     {
         if (!function_exists('atlaspayCreateOrder')) {
@@ -867,6 +964,11 @@ final class PaymentInitHandler extends BaseHandler
         }
         if ($max > 0 && $amount > $max) {
             FaoximaResponse::fail(422, faoxima_render_text(faoxima_textbot_get('dyn_paymentinit_max_amount', '❌ حداکثر مبلغ پرداخت {max} تومان است.'), ['max' => number_format($max)]));
+        }
+
+        if (atlaspayPaymentMode() === 'custom') {
+            $this->handleAtlasPayCustom($amount);
+            return;
         }
 
         $orderId = bin2hex(random_bytes(5));
@@ -897,7 +999,8 @@ final class PaymentInitHandler extends BaseHandler
         update('Payment_report', 'atlaspay_order_id', $atlaspayOrderId, 'id_order', $orderId);
         update('Payment_report', 'atlaspay_tracking_code', $trackingCode, 'id_order', $orderId);
         update('Payment_report', 'atlaspay_payment_url', $paymentUrl, 'id_order', $orderId);
-        update('Payment_report', 'price', $totalAmountToman, 'id_order', $orderId);
+        update('Payment_report', 'atlaspay_total_amount', $totalAmountToman, 'id_order', $orderId);
+        rxPaymentV2Mark($orderId, ['atlaspay_created_at' => time()]);
 
         FaoximaResponse::ok([
             'kind'     => 'url',

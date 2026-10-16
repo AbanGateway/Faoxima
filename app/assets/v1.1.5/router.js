@@ -4,9 +4,9 @@ import { services as servicesPage } from './pages/services.js?v=0.0.53';
 import { buy as buyPage } from './pages/buy.js?v=0.0.62';
 import { account as accountPage } from './pages/account.js?v=0.0.52';
 import { settings as settingsPage } from './pages/settings.js?v=0.0.52';
-import { recharge as rechargePage } from './pages/recharge.js?v=0.0.62';
+import { recharge as rechargePage } from './pages/recharge.js?v=0.0.64';
 import { icon } from './icons.js?v=0.0.52';
-import { methodLabel, handleInitResult } from './payment-ui.js?v=0.0.65';
+import { methodLabel, handleInitResult } from './payment-ui.js?v=0.0.67';
 import { startVerifyTracker } from './card-verify.js?v=0.0.4';
 
 
@@ -60,6 +60,20 @@ async function watchResumePage(view, encodedOrderId) {
             expiresAtSec = nowSec + WATCH_WINDOW_SEC;
         }
     } catch (_) {  }
+    if (statusObj.tonpay_custom) {
+        const customMod = await import('./pages/tonpay-custom.js?v=0.0.7');
+        return customMod.startTonpayCustom(view, orderId, {
+            mode: flowStr === 'direct_buy' ? 'direct_buy' : 'recharge',
+            initialView: statusObj.tonpay_custom,
+        });
+    }
+    if (statusObj.atlaspay_custom) {
+        const atlasMod = await import('./pages/atlaspay-custom.js?v=0.0.1');
+        return atlasMod.startAtlaspayCustom(view, orderId, {
+            mode: flowStr === 'direct_buy' ? 'direct_buy' : 'recharge',
+            initialView: statusObj.atlaspay_custom,
+        });
+    }
     if (statusObj.verify && methodStr === 'cart to cart' && paymentStatus === 'Unpaid' && String(statusObj.verify.verify_status || '') === 'waiting') {
         view.innerHTML = `
             <article class="card card-window">

@@ -379,6 +379,7 @@ function rxRenderFeatureStatus($rxFeatView, $from_id) {
     } elseif ($rxFeatView === 'glass_mode') {
         $rxGlassOn = (string)($setting['inlinebtnmain'] ?? 'offinline') === 'oninline';
         $rxAutoRemoveOn = (string)($setting['auto_remove_reply_keyboard'] ?? 'on') !== 'off';
+        $rxRichOn = (string)($setting['user_rich_buttons_enabled'] ?? 'off') === 'on';
 
         $rxFeatKb = [
             [['text' => $rxGlassOn ? $textbotlang['Admin']['Status']['statuson'] : $textbotlang['Admin']['Status']['statusoff'],
@@ -387,15 +388,22 @@ function rxRenderFeatureStatus($rxFeatView, $from_id) {
             [['text' => $rxAutoRemoveOn ? $textbotlang['Admin']['Status']['statuson'] : $textbotlang['Admin']['Status']['statusoff'],
               'callback_data' => "editstsuts-auto_remove_kb-" . ($rxAutoRemoveOn ? 'on' : 'off')],
              ['text' => "🧹 حذف خودکار Reply Keyboard", 'callback_data' => "none"]],
+            [['text' => $rxRichOn ? $textbotlang['Admin']['Status']['statuson'] : $textbotlang['Admin']['Status']['statusoff'],
+              'callback_data' => "editstsuts-user_rich_buttons-" . ($rxRichOn ? 'on' : 'off')],
+             ['text' => "دکمه داخل متن پیام", 'callback_data' => "none"]],
+            [['text' => "تنظیمات داخلی متن", 'callback_data' => "richsec_menu"]],
             $rxBackRow,
         ];
 
         $rxFeatTitle = "🛡 <b>تنظیمات دکمه شیشه‌ای</b>\n\n"
             . "📌 <b>وضعیت فعلی:</b>\n"
             . "• شیشه‌ای بودن دکمه ربات: " . ($rxGlassOn ? "✅ روشن" : "❌ خاموش") . "\n"
-            . "• حذف خودکار Reply Keyboard: " . ($rxAutoRemoveOn ? "✅ روشن" : "❌ خاموش") . "\n\n"
+            . "• حذف خودکار Reply Keyboard: " . ($rxAutoRemoveOn ? "✅ روشن" : "❌ خاموش") . "\n"
+            . "• دکمه داخل متن پیام: " . ($rxRichOn ? "✅ روشن" : "❌ خاموش") . "\n"
+            . "\n"
             . "💡 اگر «شیشه‌ای بودن» خاموش باشد، منوها به‌صورت Reply Keyboard عادی نمایش داده می‌شوند.\n"
-            . "اگر «شیشه‌ای بودن» روشن باشد، منوها Inline نمایش داده می‌شوند و «حذف خودکار Reply Keyboard» مشخص می‌کند که کیبورد قبلی به‌طور خودکار پاک شود یا نه.";
+            . "اگر «شیشه‌ای بودن» روشن باشد، منوها Inline نمایش داده می‌شوند و «حذف خودکار Reply Keyboard» مشخص می‌کند که کیبورد قبلی به‌طور خودکار پاک شود یا نه.\n"
+            . "اگر «دکمه داخل متن پیام» روشن باشد، دکمه‌های کاربران داخل خود پیام نمایش داده می‌شوند. این حالت می‌تواند هم‌زمان با «شیشه‌ای بودن» روشن باشد؛ بخش‌هایی که در «تنظیمات داخلی متن» انتخاب شده‌اند با دکمه داخل متن و بقیه با حالت عادی نمایش داده می‌شوند.";
     } else {
         return false;
     }

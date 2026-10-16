@@ -918,6 +918,7 @@ if (!empty($datain) && in_array($from_id, $admin_ids ?? [])) {
 
         'tonpay_name'     => "🏷️ نام نمایشی درگاه تون‌پی",
         'tonpay_apikey'   => "🔑 ثبت API Key تون‌پی",
+        'tonpay_customkey' => "🔐 ثبت API Key کاستوم تون‌پی",
         'tonpay_paymode'  => "🔀 مقصد پرداخت تون‌پی",
         'tonpay_cashback' => "💰 کش بک تون‌پی",
         'tonpay_min'      => "⬇️ کف تون‌پی",
@@ -967,6 +968,7 @@ if (!empty($datain) && in_array($from_id, $admin_ids ?? [])) {
 
         'atlaspay_name'     => "🏷️ نام نمایشی درگاه اطلس‌پی",
         'atlaspay_apikey'   => "🔑 ثبت API Key اطلس‌پی",
+        'atlaspay_paymode'  => "🔀 مقصد پرداخت اطلس‌پی",
         'atlaspay_account'  => "📊 موجودی و اطلاعات حساب",
         'atlaspay_cashback' => "💰 کش بک اطلس‌پی",
         'atlaspay_min'      => "⬇️ کف اطلس‌پی",

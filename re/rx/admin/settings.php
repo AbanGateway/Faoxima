@@ -1373,24 +1373,34 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     ]);
     Editmessagetext($from_id, $message_id, "روشن گردید", $statusternadoo);
 } elseif ($text == "🔑 ثبت API Key ترونادو" && $adminrulecheck['rule'] == "administrator") {
-    $PaySetting = select("PaySetting", "ValuePay", "NamePay", "apiternado", "select");
-    $currentKey = $PaySetting['ValuePay'] ?? 'ثبت نشده';
-    $texttronseller = "🔑 کلید API ترونادو خود را اینجا وارد کنید.\n\nکلید فعلی شما: {$currentKey}";
-    nm_adminInstantReply($from_id, $texttronseller, $backadmin, 'HTML');
+    sendmessage($from_id, tronadoAdminSetupText(), tronadoAdminSetupKeyboard(), 'HTML');
+    nm_adminInstantReply($from_id, "🔑 کلید API ترونادو خود را اینجا وارد کنید.\n\nبرای حفظ امنیت، مقدار کلید فعلی نمایش داده نمی‌شود.", $backadmin, 'HTML');
     step('apiternado', $from_id);
 } elseif ($user['step'] == "apiternado") {
-    nm_adminInstantReply($from_id, $textbotlang['Admin']['SettingnowPayment']['Savaapi'], $trnado, 'HTML');
-    update("PaySetting", "ValuePay", $text, "NamePay", "apiternado");
+    $newTronadoKey = trim((string) $text);
+    if ($newTronadoKey === '' || preg_match('/\s/', $newTronadoKey)) {
+        nm_adminInstantReply($from_id, "❌ کلید API نامعتبر است. کلید را بدون فاصله و به‌صورت یک متن ارسال کنید.", $backadmin, 'HTML');
+        return;
+    }
+    update("PaySetting", "ValuePay", $newTronadoKey, "NamePay", "apiternado");
+    nm_adminInstantReply($from_id, $textbotlang['Admin']['SettingnowPayment']['Savaapi'] . "\n\nℹ️ صحت کلید با ترونادو بررسی نشد؛ پس از ثبت دامنه‌ی Callback، با یک پرداخت آزمایشی کوچک از عملکرد آن مطمئن شوید.", $trnado, 'HTML');
+    sendmessage($from_id, tronadoAdminSetupText(), tronadoAdminSetupKeyboard(), 'HTML');
     step('home', $from_id);
 } elseif ($text == "🔏 ثبت کلید امضای IPN ترونادو" && $adminrulecheck['rule'] == "administrator") {
     $PaySetting = select("PaySetting", "ValuePay", "NamePay", "ipnsigningkeytronado", "select");
-    $currentKey = $PaySetting['ValuePay'] ?? 'ثبت نشده';
-    $texttronseller = "🔏 کلید امضای IPN (IpnSigningKey) ترونادو را اینجا وارد کنید.\n\nکلید فعلی شما: {$currentKey}";
+    $currentSigning = trim((string) ($PaySetting['ValuePay'] ?? ''));
+    $signingStatus = $currentSigning === '' ? 'ثبت نشده' : 'ثبت شده (' . tronadoAdminMaskSecret($currentSigning) . ')';
+    $texttronseller = "🔏 کلید امضای IPN (IpnSigningKey) ترونادو را اینجا وارد کنید.\n\nوضعیت فعلی: {$signingStatus}\n\nاین کلید با API Key جداست و برای تأیید امضای Callbackها استفاده می‌شود. برای حفظ امنیت، مقدار کلید نمایش داده نمی‌شود.";
     nm_adminInstantReply($from_id, $texttronseller, $backadmin, 'HTML');
     step('ipnsigningkeytronado', $from_id);
 } elseif ($user['step'] == "ipnsigningkeytronado") {
+    $newSigningKey = trim((string) $text);
+    if ($newSigningKey === '' || preg_match('/\s/', $newSigningKey)) {
+        nm_adminInstantReply($from_id, "❌ کلید امضا نامعتبر است. کلید را بدون فاصله و به‌صورت یک متن ارسال کنید.", $backadmin, 'HTML');
+        return;
+    }
     nm_adminInstantReply($from_id, $textbotlang['Admin']['SettingnowPayment']['Savaapi'], $trnado, 'HTML');
-    update("PaySetting", "ValuePay", $text, "NamePay", "ipnsigningkeytronado");
+    update("PaySetting", "ValuePay", $newSigningKey, "NamePay", "ipnsigningkeytronado");
     step('home', $from_id);
 } elseif ($text == "💼 آدرس کیف پول ترونادو" && $adminrulecheck['rule'] == "administrator") {
     $PaySetting = select("PaySetting", "ValuePay", "NamePay", "walletaddress", "select");
@@ -1418,6 +1428,7 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
         . "🔹 ۱۰۰: کل کارمزد را شما پرداخت می‌کنید. کاربر تقریباً همان مبلغ فاکتور را پرداخت می‌کند، اما مقدار ترونی که به کیف پول شما واریز می‌شود کمتر از درخواستی است.\n\n"
         . "🔹 بین ۰ تا ۱۰۰: کارمزد بین شما و کاربر به‌نسبت تقسیم می‌شود.\n\n"
         . "⚠️ توجه: تغییر این عدد فقط نحوه تقسیم کارمزد را مشخص می‌کند و باعث تغییر در فاکتور شما نمی‌شود؛ اگر مطمئن نیستید، آن را روی ۰ نگه دارید.\n\n"
+        . "ℹ️ این تنظیم «کش‌بک» نیست؛ کش‌بک کاربران از دکمه «💰 کش بک ترونادو» تنظیم می‌شود. تغییر این عدد فقط برای فاکتورهای جدید اعمال می‌شود.\n\n"
         . "لطفاً عددی بین ۰ تا ۱۰۰ ارسال کنید.\n\nمقدار فعلی: {$currentValue}";
     nm_adminInstantReply($from_id, $texttronseller, $backadmin, 'HTML');
     step('wageFromBusinessPercentageTronado', $from_id);
@@ -1443,7 +1454,22 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     nm_adminInstantReply($from_id, $textbotlang['Admin']['SettingnowPayment']['Savaapi'], $tonpay, 'HTML');
     update("PaySetting", "ValuePay", $text, "NamePay", "apitonpay");
     step('home', $from_id);
-} elseif (($text == "🔀 مقصد پرداخت تون‌پی" || preg_match('/^tonpay_paymode_(bot|web)$/', (string) $datain, $tonpayModeMatch)) && $adminrulecheck['rule'] == "administrator") {
+} elseif ($text == "🔐 ثبت API Key کاستوم تون‌پی" && $adminrulecheck['rule'] == "administrator") {
+    $currentCustomKey = function_exists('tonpayMaskSecret') && function_exists('tonpayCustomApiKey') ? tonpayMaskSecret(tonpayCustomApiKey()) : '';
+    if ($currentCustomKey === '') {
+        $currentCustomKey = 'ثبت نشده';
+    }
+    $currentCustomKey = htmlspecialchars($currentCustomKey, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    nm_adminInstantReply($from_id, "🔐 کلید API درگاه کاستوم تلگرام تون‌پی را اینجا وارد کنید.\n\nاین کلید با کلید درگاه معمولی متفاوت است و فقط برای حالت پرداخت داخلی (کاستوم) استفاده می‌شود.\n\nکلید فعلی شما: {$currentCustomKey}", $backadmin, 'HTML');
+    step('apitonpaycustom', $from_id);
+} elseif ($user['step'] == "apitonpaycustom") {
+    if (!function_exists('tonpayCustomSaveApiKey') || !tonpayCustomSaveApiKey($text)) {
+        nm_adminInstantReply($from_id, "❌ ذخیره کلید ناموفق بود. دوباره تلاش کنید.", $tonpay, 'HTML');
+    } else {
+        nm_adminInstantReply($from_id, $textbotlang['Admin']['SettingnowPayment']['Savaapi'], $tonpay, 'HTML');
+    }
+    step('home', $from_id);
+} elseif (($text == "🔀 مقصد پرداخت تون‌پی" || preg_match('/^tonpay_paymode_(bot|web|custom)$/', (string) $datain, $tonpayModeMatch)) && $adminrulecheck['rule'] == "administrator") {
     if (!empty($tonpayModeMatch[1])) {
         update("PaySetting", "ValuePay", $tonpayModeMatch[1], "NamePay", "tonpay_payment_mode");
         telegram('answerCallbackQuery', ['callback_query_id' => $callback_query_id, 'text' => '✅ مقصد پرداخت تون‌پی ذخیره شد', 'show_alert' => false]);
@@ -1453,13 +1479,50 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     }
     $tonpayBotMark = $tonpayMode === 'bot' ? '✅ ' : '';
     $tonpayWebMark = $tonpayMode === 'web' ? '✅ ' : '';
+    $tonpayCustomMark = $tonpayMode === 'custom' ? '✅ ' : '';
     $tonpayModeKb = json_encode(['inline_keyboard' => [
         [['text' => "{$tonpayBotMark}🤖 پرداخت از طریق ربات تلگرام", 'callback_data' => 'tonpay_paymode_bot']],
         [['text' => "{$tonpayWebMark}🌐 پرداخت از طریق وب", 'callback_data' => 'tonpay_paymode_web']],
+        [['text' => "{$tonpayCustomMark}💳 درگاه کاستوم (پرداخت داخل ربات و مینی‌اپ)", 'callback_data' => 'tonpay_paymode_custom']],
         [['text' => "🔙 بازگشت", 'callback_data' => 'tonpaysetting']],
     ]], JSON_UNESCAPED_UNICODE);
-    $tonpayModeLabel = $tonpayMode === 'web' ? '🌐 پرداخت از طریق وب' : '🤖 پرداخت از طریق ربات تلگرام';
-    nm_adminInstantReply($from_id, "🔀 مقصد پرداخت تون‌پی\n\nلینک پرداختی که برای کاربر ارسال می‌شود را انتخاب کنید. اگر لینک وب از سمت تون‌پی دریافت نشود، لینک ربات تلگرام ارسال خواهد شد.\n\nحالت فعلی: <b>{$tonpayModeLabel}</b>", $tonpayModeKb, 'HTML');
+    $tonpayModeLabels = [
+        'bot' => '🤖 پرداخت از طریق ربات تلگرام',
+        'web' => '🌐 پرداخت از طریق وب',
+        'custom' => '💳 درگاه کاستوم (پرداخت داخل ربات و مینی‌اپ)',
+    ];
+    $tonpayModeLabel = $tonpayModeLabels[$tonpayMode] ?? $tonpayModeLabels['bot'];
+    $tonpayCustomWarning = '';
+    if ($tonpayMode === 'custom' && (!function_exists('tonpayCustomApiKey') || tonpayCustomApiKey() === '')) {
+        $tonpayCustomWarning = "\n\n⚠️ کلید API درگاه کاستوم هنوز ثبت نشده است؛ تا زمان ثبت کلید، ساخت فاکتور جدید با خطا مواجه می‌شود.";
+    }
+    nm_adminInstantReply($from_id, "🔀 مقصد پرداخت تون‌پی\n\nلینک پرداختی که برای کاربر ارسال می‌شود را انتخاب کنید. اگر لینک وب از سمت تون‌پی دریافت نشود، لینک ربات تلگرام ارسال خواهد شد.\n\nدر حالت کاستوم، کاربر تمام مراحل پرداخت (کارت، رسید و پیگیری) را داخل ربات یا مینی‌اپ انجام می‌دهد. فاکتورهای قبلی با همان روشی که ساخته شده‌اند ادامه پیدا می‌کنند.\n\nحالت فعلی: <b>{$tonpayModeLabel}</b>{$tonpayCustomWarning}", $tonpayModeKb, 'HTML');
+} elseif (($text == "🔀 مقصد پرداخت اطلس‌پی" || preg_match('/^atlaspay_paymode_(official|custom)$/', (string) $datain, $atlaspayModeMatch)) && $adminrulecheck['rule'] == "administrator") {
+    $atlaspayRegisterNote = '';
+    if (!empty($atlaspayModeMatch[1])) {
+        atlaspayCustomSaveSetting('atlaspay_payment_mode', $atlaspayModeMatch[1]);
+        telegram('answerCallbackQuery', ['callback_query_id' => $callback_query_id, 'text' => '✅ مقصد پرداخت اطلس‌پی ذخیره شد', 'show_alert' => false]);
+        $atlaspayMode = $atlaspayModeMatch[1];
+        if ($atlaspayMode === 'custom') {
+            $atlaspayRegistration = atlaspayCustomRegisterWebhook();
+            $atlaspayRegisterNote = "\n\n" . (!empty($atlaspayRegistration['ok']) ? '✅ ' : '⚠️ ') . htmlspecialchars((string) ($atlaspayRegistration['message'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        }
+    } else {
+        $atlaspayMode = atlaspayPaymentMode();
+    }
+    $atlaspayOfficialMark = $atlaspayMode === 'official' ? '✅ ' : '';
+    $atlaspayCustomMark = $atlaspayMode === 'custom' ? '✅ ' : '';
+    $atlaspayModeKb = json_encode(['inline_keyboard' => [
+        [['text' => "{$atlaspayOfficialMark}🌐 پرداخت از طریق اطلس‌پی", 'callback_data' => 'atlaspay_paymode_official']],
+        [['text' => "{$atlaspayCustomMark}💎 پرداخت مستقیم در ربات و مینی‌اپ ما", 'callback_data' => 'atlaspay_paymode_custom']],
+        [['text' => "🔙 بازگشت", 'callback_data' => 'atlaspaysetting']],
+    ]], JSON_UNESCAPED_UNICODE);
+    $atlaspayModeLabel = $atlaspayMode === 'custom' ? '💎 پرداخت مستقیم در ربات و مینی‌اپ ما' : '🌐 پرداخت از طریق اطلس‌پی';
+    $atlaspayModeWarning = '';
+    if ($atlaspayMode === 'custom') {
+        $atlaspayModeWarning = "\n\n⚠️ برای نمایش شماره کارت داخل ربات و مینی‌اپ، قابلیت «نمایش مستقیم اطلاعات پرداخت» باید از سمت اطلس‌پی برای فروشگاه شما فعال شده باشد (از دکمه «🆘 پشتیبانی» ربات اطلس‌پی درخواست فعال‌سازی بدهید). تا زمان فعال‌سازی، کاربر فقط از طریق دکمه «ارسال رسید پرداخت» به صفحه رسمی اطلس‌پی هدایت می‌شود.";
+    }
+    nm_adminInstantReply($from_id, "🔀 مقصد پرداخت اطلس‌پی\n\nدر حالت رسمی، کاربر برای پرداخت به مینی‌اپ رسمی اطلس‌پی هدایت می‌شود. در حالت مستقیم، اطلاعات پرداخت داخل ربات و مینی‌اپ نمایش داده می‌شود و فقط ارسال رسید در مینی‌اپ رسمی اطلس‌پی انجام می‌شود. فاکتورهای قبلی با همان روشی که ساخته شده‌اند ادامه پیدا می‌کنند.\n\nحالت فعلی: <b>{$atlaspayModeLabel}</b>{$atlaspayModeWarning}{$atlaspayRegisterNote}", $atlaspayModeKb, 'HTML');
 } elseif ($text == "🔑 ثبت API Key اطلس‌پی" && $adminrulecheck['rule'] == "administrator") {
     $PaySetting = select("PaySetting", "ValuePay", "NamePay", "apiatlaspay", "select");
     $currentKey = $PaySetting['ValuePay'] ?? 'ثبت نشده';

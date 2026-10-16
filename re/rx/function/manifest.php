@@ -26,4 +26,11 @@ return array (
   23 => 'test_account_policy.php',
   24 => 'receipt_verification.php',
   25 => 'receipt_verification_admin.php',
+  26 => 'tonpay_custom.php',
+  27 => 'rich_ui.php',
+  28 => 'ui_decor.php',
+  29 => 'ui_sections.php',
+  30 => 'atlaspay_custom.php',
+  31 => 'payment_v2.php',
+  32 => 'account_layout.php',
 );

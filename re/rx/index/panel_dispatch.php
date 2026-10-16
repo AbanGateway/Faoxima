@@ -1586,7 +1586,7 @@ $text_porsant
     }
     step('home', $from_id);
 } elseif ((($text !== '' && $text == $datatextbot['textpanelagent']) || $datain == "agentpanel") && $user['agent'] != "f") {
-    if ($setting['inlinebtnmain'] == "oninline") {
+    if ($setting['inlinebtnmain'] == "oninline" || (function_exists('rx_richSectionActive') && rx_richSectionActive('agent'))) {
         Editmessagetext($from_id, $message_id, $textbotlang['Admin']['agent']['agenttext'], $keyboardagent, 'HTML');
     } else {
         sendmessage($from_id, $textbotlang['Admin']['agent']['agenttext'], $keyboardagent, 'HTML');

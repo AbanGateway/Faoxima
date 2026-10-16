@@ -397,6 +397,7 @@ if (in_array($text, $textadmin) || $datain == "admin") {
             'ipnsigningkeytronado' => $trnado,
             'wageFromBusinessPercentageTronado' => $trnado,
             'apitonpay' => $tonpay,
+            'apitonpaycustom' => $tonpay,
             'getcashtonpay' => $tonpay,
             'getmaintonpay' => $tonpay,
             'getmaxtonpay' => $tonpay,
@@ -3961,6 +3962,9 @@ $caption";
 
     rxRenderFeatureStatus('glass_mode', $from_id);
     return;
+} elseif (strpos((string)$datain, 'richsec_') === 0 && function_exists('rx_ui_sections_admin_action')
+    && rx_ui_sections_admin_action((string)$datain, $from_id, ($adminrulecheck['rule'] ?? '') === 'administrator', $callback_query_id ?? null)) {
+    return;
 } elseif ($datain === 'run_redis_status' && $adminrulecheck['rule'] === 'administrator') {
 
     rxRenderFeatureStatus('redis', $from_id);
@@ -4238,14 +4242,13 @@ $caption";
         $valuenew = ($current === "onAuthenticationiran") ? "offAuthenticationiran" : "onAuthenticationiran";
         update("setting", "iran_number", $valuenew);
         $setting['iran_number'] = $valuenew;
-    } elseif ($type == "inlinebtnmain") {
-        if ($value == "oninline") {
-            $valuenew = "offinline";
-        } else {
-            $valuenew = "oninline";
-        }
-        update("setting", "inlinebtnmain", $valuenew);
-        $setting['inlinebtnmain'] = $valuenew;
+    } elseif ($type == "inlinebtnmain" || $type == "user_rich_buttons") {
+        rx_richUi_adminToggle(
+            $type == "inlinebtnmain" ? 'glass' : 'rich',
+            (string)$value,
+            ($adminrulecheck['rule'] ?? '') === 'administrator',
+            $callback_query_id ?? null
+        );
         rxRenderFeatureStatus('glass_mode', $from_id);
         return;
     } elseif ($type == "auto_remove_kb") {

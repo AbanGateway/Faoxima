@@ -8,7 +8,7 @@ import { icon } from '../icons.js?v=0.0.52';
 import { showVerifyPending } from '../card-verify.js?v=0.0.4';
 import {
     fmtNum, renderMethodCard, handleInitResult, resolveWalletChoice, walletBreakdownHtml,
-} from '../payment-ui.js?v=0.0.65';
+} from '../payment-ui.js?v=0.0.67';
 
 
 let _successModulePromise = null;

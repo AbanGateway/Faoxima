@@ -565,6 +565,8 @@ try {
         volumewarn varchar(200)  NULL,
         inlinebtnmain varchar(200)  NULL,
         auto_remove_reply_keyboard varchar(20) NULL DEFAULT 'on',
+        user_rich_buttons_enabled varchar(20) NULL DEFAULT 'off',
+        user_rich_sections text NULL,
         verifystart varchar(200)  NULL,
         id_support varchar(200)  NULL,
         statusnamecustom varchar(100)  NULL,
@@ -688,6 +690,9 @@ try {
         addFieldToTable("setting", "affiliatespercentage", "0", "VARCHAR(600)");
         addFieldToTable("setting", "inlinebtnmain", "offinline", "VARCHAR(200)");
         addFieldToTable("setting", "auto_remove_reply_keyboard", "on", "VARCHAR(20)");
+        addFieldToTable("setting", "user_rich_buttons_enabled", "off", "VARCHAR(20)");
+        addFieldToTable("setting", "user_rich_sections", null, "TEXT");
+        addFieldToTable("user", "ui_section", null, "VARCHAR(24)");
         addFieldToTable("setting", "volumewarn", "2", "VARCHAR(200)");
         addFieldToTable("setting", "statusagentrequest", "onrequestagent", "VARCHAR(600)");
         addFieldToTable("setting", "statusnewuser", "onnewuser", "VARCHAR(600)");
@@ -707,6 +712,7 @@ try {
 
         addFieldToTable("setting", "premium_emoji_status", "0", "VARCHAR(20)");
         addFieldToTable("setting", "keyboard_styles_all", "{}", "TEXT");
+        addFieldToTable("setting", "account_keyboard_layout", null, "TEXT");
 
 
         addFieldToTable("setting", "antispam_status", "0", "VARCHAR(20)");
@@ -2102,6 +2108,19 @@ try {
             $insertQueries[] = ['dyn_renewal_' . $rxRenewalTextKey, $rxRenewalTextValue];
         }
     }
+    $rxTonpayTemplatesFile = __DIR__ . '/re/rx/function/tonpay_templates.php';
+    if (is_file($rxTonpayTemplatesFile)) {
+        require_once $rxTonpayTemplatesFile;
+        foreach (tonpayTemplateDefaults() as $rxTonpayTemplateKey => $rxTonpayTemplateValue) {
+            $insertQueries[] = [$rxTonpayTemplateKey, $rxTonpayTemplateValue];
+        }
+        if ($table_exists) {
+            $rxTonpayWarningNew = $connect->real_escape_string(tonpayTemplateDefaults()['dyn_tonpay_amount_warning']);
+            $rxTonpayWarningOld = $connect->real_escape_string(tonpayLegacyAmountWarningDefault());
+            $connect->query("UPDATE textbot SET text = '$rxTonpayWarningNew' WHERE id_text = 'dyn_tonpay_amount_warning' AND text = '$rxTonpayWarningOld'");
+            $connect->query("UPDATE textbot SET text = REPLACE(text, '<b>پرداخت کارت‌به‌کارت (تون‌پی)</b>', '<b>{gateway_title}</b>') WHERE id_text IN ('dyn_tonpay_invoice_tpl', 'dyn_tonpay_progress_tpl')");
+        }
+    }
     if (!$table_exists) {
         $result = $connect->query("CREATE TABLE textbot (
         id_text varchar(600) PRIMARY KEY NOT NULL,
@@ -2290,6 +2309,7 @@ try {
         ['maxbalancetonpay', $max],
         ['helptonpay', '2'],
         ['tonpay_payment_mode', 'bot'],
+        ['tonpay_custom_api_key', ''],
         ['statuscubepay', 'offcubepay'],
         ['apicubepay', ''],
         ['chashbackcubepay', '0'],
@@ -2323,6 +2343,8 @@ try {
         ['minbalanceatlaspay', 50000],
         ['maxbalanceatlaspay', 2000000],
         ['helpatlaspay', '2'],
+        ['atlaspay_payment_mode', 'official'],
+        ['atlaspay_webhook_secret', ''],
         ['chashbackcart_target', 'all'],
         ['chashbackiranpay2_target', 'all'],
         ['chashbacktonpay_target', 'all'],
@@ -3419,6 +3441,18 @@ try {
     rxSafeAddColumn($connect, "Payment_report", "tonpay_invoice_url",     "VARCHAR(500) NULL");
     rxSafeAddColumn($connect, "Payment_report", "tonpay_web_invoice_url", "VARCHAR(500) NULL");
     rxSafeAddColumn($connect, "Payment_report", "tonpay_last_checked_at", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tonpay_gateway_mode", "VARCHAR(10) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tonpay_final_amount", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tonpay_card_number", "VARCHAR(40) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tonpay_card_name", "VARCHAR(120) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tonpay_remote_status", "VARCHAR(20) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tonpay_created_at", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tonpay_receipt_available_at", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tonpay_receipt_submitted_at", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tonpay_review_deadline_at", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tonpay_local_state", "VARCHAR(24) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tonpay_card_changed_at", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tonpay_change_card_exhausted", "TINYINT(1) NOT NULL DEFAULT 0");
     rxSafeAddColumn($connect, "Payment_report", "cubepay_authority",      "VARCHAR(64) NULL");
     rxSafeAddColumn($connect, "Payment_report", "cubepay_payment_link",   "VARCHAR(500) NULL");
     rxSafeAddColumn($connect, "Payment_report", "cubepay_method",         "VARCHAR(20) NULL");
@@ -3427,6 +3461,41 @@ try {
     rxSafeAddColumn($connect, "Payment_report", "atlaspay_order_id",      "VARCHAR(64) NULL");
     rxSafeAddColumn($connect, "Payment_report", "atlaspay_tracking_code", "VARCHAR(64) NULL");
     rxSafeAddColumn($connect, "Payment_report", "atlaspay_payment_url",   "VARCHAR(500) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "atlaspay_gateway_mode", "VARCHAR(10) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "atlaspay_total_amount", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "atlaspay_card_number", "VARCHAR(40) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "atlaspay_card_name", "VARCHAR(120) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "atlaspay_bank_name", "VARCHAR(80) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "atlaspay_remote_status", "VARCHAR(40) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "atlaspay_created_at", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "atlaspay_deadline_at", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "atlaspay_local_state", "VARCHAR(32) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "atlaspay_last_checked_at", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "atlaspay_actual_received", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "atlaspay_manual_delivery", "TINYINT(1) NOT NULL DEFAULT 0");
+    rxSafeAddColumn($connect, "Payment_report", "payment_processing_version", "TINYINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tronado_tron_amount", "DECIMAL(24,8) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tronado_wage_pct", "SMALLINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tronado_estimated_toman", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tronado_token", "VARCHAR(80) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tronado_created_at", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tronado_local_state", "VARCHAR(24) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tronado_last_checked_at", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tronado_review_reason", "VARCHAR(255) NULL");
+    rxSafeAddColumn($connect, "Payment_report", "tronado_paid_toman", "BIGINT NULL");
+    rxSafeAddColumn($connect, "Payment_report", "stars_amount", "INT NULL");
+    $connect->query("CREATE TABLE IF NOT EXISTS tronado_dispute_event (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        dispute_id BIGINT NOT NULL,
+        event_id VARCHAR(64) NOT NULL,
+        payment_id VARCHAR(128) NOT NULL,
+        outcome VARCHAR(32) NULL,
+        payload MEDIUMTEXT NULL,
+        created_at BIGINT NOT NULL,
+        UNIQUE KEY uniq_tronado_dispute (dispute_id),
+        UNIQUE KEY uniq_tronado_dispute_event (event_id),
+        KEY idx_tronado_dispute_payment (payment_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci");
 
     try {
         $haveBlupalIdx = $connect->query("SHOW INDEX FROM Payment_report WHERE Key_name = 'idx_pr_blupal_invoice'");
@@ -3743,6 +3812,7 @@ try {
 try {
     addFieldToTable("setting", "premium_emoji_status", "0", "VARCHAR(20)");
     addFieldToTable("setting", "keyboard_styles_all", "{}", "TEXT");
+    addFieldToTable("setting", "account_keyboard_layout", null, "TEXT");
     addFieldToTable("setting", "forced_miniapp_mode", "0", "VARCHAR(20)");
     addFieldToTable("setting", "miniapp_ticket_mode", "0", "VARCHAR(20)");
 } catch (Exception $e) {
@@ -3833,6 +3903,17 @@ try {
         KEY idx_processed_updates_time (processed_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     rxSafeAddIndex($connect, 'processed_updates', 'idx_processed_updates_time', 'processed_at');
+
+    $connect->query("CREATE TABLE IF NOT EXISTS ui_decor (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        id_user BIGINT NOT NULL,
+        message_id BIGINT NOT NULL,
+        kind VARCHAR(12) NOT NULL,
+        screen VARCHAR(40) NOT NULL DEFAULT '',
+        created_at INT NOT NULL,
+        UNIQUE KEY uq_user_message (id_user, message_id),
+        KEY idx_user_id (id_user, id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
     $connect->query("CREATE TABLE IF NOT EXISTS cron_runtime_state (
         job_key VARCHAR(255) PRIMARY KEY,

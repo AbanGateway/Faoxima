@@ -456,6 +456,18 @@ function handleInitResult(view, methodId, obj) {
         return;
     }
 
+    if (obj.kind === 'tonpay_custom') {
+        if ($form) $form.innerHTML = '';
+        startTonpayCustomForRecharge(view, obj);
+        return;
+    }
+
+    if (obj.kind === 'atlaspay_custom') {
+        if ($form) $form.innerHTML = '';
+        startAtlaspayCustomForRecharge(view, obj);
+        return;
+    }
+
     if (obj.kind === 'carttocart') {
         if ($form) $form.innerHTML = '';
         if (obj.card_verify_required) {
@@ -1021,6 +1033,32 @@ function openLink(url, opts) {
         tg.openLink(u);
     } else {
         window.open(u, '_blank', 'noopener');
+    }
+}
+
+async function startTonpayCustomForRecharge(view, obj) {
+    try {
+        const mod = await import('./tonpay-custom.js?v=0.0.7');
+        mod.startTonpayCustom(view, String(obj.order_id || ''), {
+            mode: 'recharge',
+            initialView: obj.view || null,
+        });
+    } catch (err) {
+        console.warn('[recharge] tonpay-custom load failed', err);
+        toast('بارگذاری صفحه پرداخت ناموفق بود. صفحه را رفرش کنید.', 'error', 4000);
+    }
+}
+
+async function startAtlaspayCustomForRecharge(view, obj) {
+    try {
+        const mod = await import('./atlaspay-custom.js?v=0.0.1');
+        mod.startAtlaspayCustom(view, String(obj.order_id || ''), {
+            mode: 'recharge',
+            initialView: obj.view || null,
+        });
+    } catch (err) {
+        console.warn('[recharge] atlaspay-custom load failed', err);
+        toast('بارگذاری صفحه پرداخت ناموفق بود. صفحه را رفرش کنید.', 'error', 4000);
     }
 }
 

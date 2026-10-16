@@ -1,6 +1,8 @@
 <?php
 
-if (isset($update['pre_checkout_query'])) {
+if (isset($update['pre_checkout_query']) && function_exists('rxStarsPreCheckoutV2') && rxStarsPreCheckoutV2($update['pre_checkout_query'])) {
+    return;
+} elseif (isset($update['pre_checkout_query'])) {
     $userid = $update['pre_checkout_query']['from']['id'];
     $id_order = $update['pre_checkout_query']['invoice_payload'];
     $Payment_report = select("Payment_report", "*", "id_order", $id_order, "select");
@@ -412,8 +414,10 @@ if (isset($update['pre_checkout_query'])) {
         ]);
     }
 }
-if (in_array($from_id, $admin_ids))
+if (in_array($from_id, $admin_ids)) {
+    $GLOBALS['rx_admin_scope'] = true;
     require_once 'admin.php';
+}
 
 $pdo = null;
 $connect->close();

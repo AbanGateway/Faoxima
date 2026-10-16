@@ -88,6 +88,10 @@ if (!checktelegramip())
 if (intval($from_id) == 0)
     return;
 
+if (isset($update['message']['successful_payment']) && function_exists('rxStarsHandleSuccessfulPayment') && rxStarsHandleSuccessfulPayment($update)) {
+    return;
+}
+
 if (!empty($callback_query_id) && function_exists('rx_flushPendingReplyKeyboardCleanup')) {
     rx_flushPendingReplyKeyboardCleanup($from_id);
 }
@@ -593,6 +597,9 @@ if (
     }
 }
 
+if (function_exists('rx_ui_resolve_request')) {
+    rx_ui_resolve_request();
+}
 if (class_exists('logNavigation')) {
     logNavigation::button($from_id);
 }

@@ -270,6 +270,124 @@ if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $data
             'reply_markup' => $Response
         ]);
     }
+} elseif ($datain === 'tpc_list') {
+    if ($user['step'] == "tpc_receipt") {
+        step('home', $from_id);
+    }
+    $tpcListView = tonpayCustomBotListView($from_id);
+    if (function_exists('atlaspayCustomBotListMerge')) {
+        $tpcListView = atlaspayCustomBotListMerge($from_id, $tpcListView);
+    }
+    Editmessagetext($from_id, $message_id, $tpcListView['text'], $tpcListView['keyboard'], 'HTML');
+    tonpayCustomBotAnswer($callback_query_id);
+} elseif (preg_match('/^apc_(chk|can|cny|view)_(\w+)$/', (string) $datain, $apcMatch)) {
+    $apcAction = $apcMatch[1];
+    $apcOrder = $apcMatch[2];
+    $apcReport = atlaspayCustomFetchReport($apcOrder);
+    if ($apcReport === null || (string) $apcReport['id_user'] !== (string) $from_id) {
+        atlaspayCustomBotAnswer($callback_query_id, '❌ این فاکتور پیدا نشد.', true);
+        return;
+    }
+    if ($apcAction == 'view') {
+        atlaspayCustomPollThrottled($apcOrder, $from_id);
+        atlaspayCustomBotRender($from_id, $message_id, $apcOrder);
+        updatePaymentMessageId(['ok' => true, 'result' => ['message_id' => $message_id]], $apcOrder);
+        atlaspayCustomBotAnswer($callback_query_id);
+    } elseif ($apcAction == 'chk') {
+        atlaspayCustomPollThrottled($apcOrder, $from_id);
+        atlaspayCustomBotRefreshOriginal($from_id, $apcOrder, $message_id);
+        atlaspayCustomBotAnswer($callback_query_id, '🔄 وضعیت به‌روزرسانی شد');
+    } elseif ($apcAction == 'can') {
+        $apcCancelState = atlaspayCustomBuildState($apcReport);
+        if (!$apcCancelState['can_cancel']) {
+            atlaspayCustomBotAnswer($callback_query_id, atlaspayCustomCancelBlockedMessage($apcCancelState), true);
+            return;
+        }
+        $apcConfirmView = atlaspayCustomBotCancelConfirmView($apcOrder, 'apc_view_' . $apcOrder);
+        Editmessagetext($from_id, $message_id, $apcConfirmView['text'], $apcConfirmView['keyboard'], 'HTML');
+        atlaspayCustomBotAnswer($callback_query_id);
+    } else {
+        $apcResult = atlaspayCustomCancel($apcOrder, $from_id);
+        if (empty($apcResult['ok'])) {
+            atlaspayCustomBotAnswer($callback_query_id, (string) ($apcResult['message'] ?? 'لغو فاکتور انجام نشد.'), true);
+            atlaspayCustomBotRender($from_id, $message_id, $apcOrder);
+            return;
+        }
+        atlaspayCustomBotRender($from_id, $message_id, $apcOrder);
+        updatePaymentMessageId(['ok' => true, 'result' => ['message_id' => $message_id]], $apcOrder);
+        atlaspayCustomBotAnswer($callback_query_id, '✅ تراکنش لغو شد');
+    }
+} elseif (preg_match('/^tpc_(chk|chg|rcp|can|cny|view)_(\w+)$/', (string) $datain, $tpcMatch)) {
+    $tpcAction = $tpcMatch[1];
+    $tpcOrder = $tpcMatch[2];
+    $tpcReport = tonpayCustomFetchReport($tpcOrder);
+    if ($tpcReport === null || (string) $tpcReport['id_user'] !== (string) $from_id) {
+        tonpayCustomBotAnswer($callback_query_id, '❌ این فاکتور پیدا نشد.', true);
+        return;
+    }
+    if ($user['step'] == "tpc_receipt") {
+        step('home', $from_id);
+    }
+    if ($tpcAction == 'view') {
+        tonpayCustomPollThrottled($tpcOrder, $from_id);
+        tonpayCustomBotRender($from_id, $message_id, $tpcOrder);
+        updatePaymentMessageId(['ok' => true, 'result' => ['message_id' => $message_id]], $tpcOrder);
+        tonpayCustomBotAnswer($callback_query_id);
+    } elseif ($tpcAction == 'cny') {
+        $tpcResult = tonpayCustomCancel($tpcOrder, $from_id);
+        if (empty($tpcResult['ok'])) {
+            tonpayCustomBotAnswer($callback_query_id, (string) ($tpcResult['message'] ?? 'لغو فاکتور انجام نشد.'), true);
+            tonpayCustomBotRender($from_id, $message_id, $tpcOrder);
+            return;
+        }
+        tonpayCustomBotRender($from_id, $message_id, $tpcOrder);
+        updatePaymentMessageId(['ok' => true, 'result' => ['message_id' => $message_id]], $tpcOrder);
+        tonpayCustomBotAnswer($callback_query_id, '✅ تراکنش لغو شد');
+    } elseif ($tpcAction == 'chk') {
+        tonpayCustomPollThrottled($tpcOrder, $from_id);
+        tonpayCustomBotRefreshOriginal($from_id, $tpcOrder, $message_id);
+        tonpayCustomBotAnswer($callback_query_id, '🔄 وضعیت به‌روزرسانی شد');
+    } elseif ($tpcAction == 'chg') {
+        $tpcResult = tonpayCustomChangeCard($tpcOrder, $from_id);
+        if (empty($tpcResult['ok'])) {
+            tonpayCustomBotAnswer($callback_query_id, (string) ($tpcResult['message'] ?? 'تعویض کارت انجام نشد.'), true);
+            return;
+        }
+        tonpayCustomBotRender($from_id, $message_id, $tpcOrder, $tpcResult['report']);
+        tonpayCustomBotAnswer($callback_query_id, '✅ کارت تعویض شد');
+    } elseif ($tpcAction == 'can') {
+        $tpcCancelState = tonpayCustomBuildState($tpcReport);
+        if (!$tpcCancelState['can_cancel']) {
+            tonpayCustomBotAnswer($callback_query_id, tonpayCustomCancelBlockedMessage($tpcCancelState), true);
+            return;
+        }
+        $tpcConfirmView = tonpayCustomBotCancelConfirmView($tpcOrder, 'tpc_view_' . $tpcOrder);
+        Editmessagetext($from_id, $message_id, $tpcConfirmView['text'], $tpcConfirmView['keyboard'], 'HTML');
+        tonpayCustomBotAnswer($callback_query_id);
+    } else {
+        $tpcReport = tonpayCustomPollThrottled($tpcOrder, $from_id) ?? $tpcReport;
+        $tpcGate = tonpayCustomReceiptGate(tonpayCustomBuildState($tpcReport));
+        if (!$tpcGate['ok']) {
+            tonpayCustomBotAnswer($callback_query_id, $tpcGate['message'], true);
+            return;
+        }
+        step('tpc_receipt', $from_id);
+        update("user", "Processing_value", $tpcOrder, "id", $from_id);
+        tonpayCustomBotAnswer($callback_query_id);
+        sendmessage($from_id, tonpayCustomReceiptPromptText(), json_encode(['inline_keyboard' => [[['text' => '🔙 بازگشت به وضعیت پرداخت', 'callback_data' => 'tpc_chk_' . $tpcOrder]]]], JSON_UNESCAPED_UNICODE), 'HTML');
+    }
+} elseif ($user['step'] == "tpc_receipt" && $datain === '' && isset($update['message'])) {
+    global $update;
+    $tpcOrder = (string) $user['Processing_value'];
+    $tpcBackKb = json_encode(['inline_keyboard' => [[['text' => '🔙 بازگشت به وضعیت پرداخت', 'callback_data' => 'tpc_chk_' . $tpcOrder]]]], JSON_UNESCAPED_UNICODE);
+    $tpcResult = tonpayCustomBotHandleReceiptUpload($from_id, $tpcOrder, $update['message']);
+    if (empty($tpcResult['ok'])) {
+        sendmessage($from_id, '❌ ' . ($tpcResult['message'] ?? 'ارسال رسید ناموفق بود.'), $tpcBackKb, 'HTML');
+        return;
+    }
+    step('home', $from_id);
+    sendmessage($from_id, tonpayCustomReceiptSubmittedText(), null, 'HTML');
+    tonpayCustomBotRefreshOriginal($from_id, $tpcOrder, 0);
 } elseif (preg_match('/^ckw_(pick|ok|menu|cancel)_/', (string) $datain)) {
     rx_ck_bot_callback($user, (string) $datain, $message_id, $callback_query_id ?? null);
 } elseif (($text !== '' && $text == $datatextbot['text_help']) || $datain == "helpbtn" || $datain == "helpbtns" || $datain == "helpmenubtn" || $text == "/help" || $text == "help") {
@@ -805,25 +923,7 @@ https://t.me/$usernamebot?start={$user['codeInvitation']}";
         '{time_now}' => $timeacc,
     ];
     $text_account = strtr($text_account_tpl, $text_account_replacements) . "\n$textscore\n$textinvite";
-    $stmtPendingMa = $pdo->prepare(
-        "SELECT id_order, price FROM Payment_report
-          WHERE id_user = :uid
-            AND payment_Status = 'waiting'
-            AND Payment_Method = 'cart to cart'
-            AND source = 'miniapp'
-            AND dec_not_confirmed = 'receipt-submitted'
-          LIMIT 1"
-    );
-    $stmtPendingMa->execute([':uid' => $from_id]);
-    $hasPendingMa = $stmtPendingMa->rowCount() > 0;
-    $kbData = json_decode($keyboardPanel, true);
-    if ($hasPendingMa) {
-        $_rx_acc_s = (isset($_rx_acc_styles) && is_array($_rx_acc_styles)) ? $_rx_acc_styles : [];
-        array_unshift($kbData['inline_keyboard'], [
-            rx_kb_style(['text' => '⏳ رسید تایید نشده از مینی‌اپ', 'callback_data' => 'my_miniapp_pending'], 'my_miniapp_pending', $_rx_acc_s)
-        ]);
-    }
-    $activeKeyboard = json_encode($kbData, JSON_UNESCAPED_UNICODE);
+    $activeKeyboard = rx_account_keyboard_json($from_id);
     if ($datain == "account" || $datain == "accountbtn") {
         Editmessagetext($from_id, $message_id, $text_account, $activeKeyboard);
     } else {
@@ -3992,6 +4092,9 @@ $textonebuy
             return;
         }
         update("Payment_report", "dec_not_confirmed", $paymentToken, "id_order", $randomString);
+        if (function_exists('tronadoV2Store')) {
+            tronadoV2Store($randomString, $payment);
+        }
         $paymentFullUrl = trim((string) ($payment['FullPaymentUrl'] ?? ''));
         if ($paymentFullUrl === '') {
             $paymentFullUrl = "https://t.me/tronado_robot/customerpayment?startapp={$paymentToken}";
@@ -4039,6 +4142,10 @@ $textonebuy
         }
         $rxPendingGw = findPendingGatewayInvoice($from_id, 'tonpay');
         if ($rxPendingGw !== null) {
+            if (tonpayCustomFetchReport($rxPendingGw['id_order']) !== null) {
+                tonpayCustomBotSend($from_id, $rxPendingGw['id_order']);
+                return;
+            }
             rx_send_pending_gateway_invoice_notice($from_id, $message_id, $rxPendingGw, 'tonpay');
             return;
         }
@@ -4052,7 +4159,10 @@ $textonebuy
         $Payment_Method = "tonpay";
         $stmt->bind_param("sssssss", $from_id, $randomString, $dateacc, $user['Processing_value'], $payment_Status, $Payment_Method, $invoice);
         $stmt->execute();
-        $payment = tonpayCreateInvoice($randomString, (int) $user['Processing_value'], (int) $from_id);
+        $tonpayCustomMode = tonpayPaymentMode() === 'custom';
+        $payment = $tonpayCustomMode
+            ? tonpayCustomCreateInvoice($randomString, (int) $user['Processing_value'], (int) $from_id)
+            : tonpayCreateInvoice($randomString, (int) $user['Processing_value'], (int) $from_id);
 
         $paymentErrorData = null;
         if (!is_array($payment)) {
@@ -4094,6 +4204,16 @@ $textonebuy
             return;
         }
 
+        if ($tonpayCustomMode) {
+            if (!tonpayCustomStoreInvoice($randomString, $payment)) {
+                update("Payment_report", "payment_Status", "reject", "id_order", $randomString);
+                sendmessage($from_id, $textbotlang['users']['Balance']['errorLinkPayment'], $keyboard, 'HTML');
+                step('home', $from_id);
+                return;
+            }
+            tonpayCustomBotSend($from_id, $randomString);
+            return;
+        }
         $invoiceId = trim((string) ($payment['invoice_id'] ?? ''));
         $invoiceUrl = trim((string) ($payment['invoice_url'] ?? ''));
         if ($invoiceId === '' || $invoiceUrl === '') {
@@ -4291,6 +4411,10 @@ $textonebuy
         }
         $rxPendingGw = findPendingGatewayInvoice($from_id, 'atlaspay');
         if ($rxPendingGw !== null) {
+            if (atlaspayCustomFetchReport($rxPendingGw['id_order']) !== null) {
+                atlaspayCustomBotSend($from_id, $rxPendingGw['id_order']);
+                return;
+            }
             rx_send_pending_gateway_invoice_notice($from_id, $message_id, $rxPendingGw, 'atlaspay');
             return;
         }
@@ -4304,7 +4428,10 @@ $textonebuy
         $Payment_Method = "atlaspay";
         $stmt->bind_param("sssssss", $from_id, $randomString, $dateacc, $user['Processing_value'], $payment_Status, $Payment_Method, $invoice);
         $stmt->execute();
-        $payment = atlaspayCreateOrder($randomString, (int) $user['Processing_value']);
+        $atlaspayCustomMode = atlaspayPaymentMode() === 'custom';
+        $payment = $atlaspayCustomMode
+            ? atlaspayCustomCreateOrder($randomString, (int) $user['Processing_value'], (int) $from_id)
+            : atlaspayCreateOrder($randomString, (int) $user['Processing_value']);
 
         $paymentErrorData = null;
         if (!is_array($payment)) {
@@ -4373,11 +4500,23 @@ $textonebuy
             }
             return;
         }
+        if ($atlaspayCustomMode) {
+            if (!atlaspayCustomStoreOrder($randomString, $payment)) {
+                atlaspayCancelOrder($atlaspayOrderId);
+                update("Payment_report", "payment_Status", "reject", "id_order", $randomString);
+                sendmessage($from_id, $textbotlang['users']['Balance']['errorLinkPayment'], $keyboard, 'HTML');
+                step('home', $from_id);
+                return;
+            }
+            atlaspayCustomBotSend($from_id, $randomString);
+            return;
+        }
         $totalAmountToman = isset($payment['totalAmountToman']) ? (int) $payment['totalAmountToman'] : (int) $user['Processing_value'];
         update("Payment_report", "atlaspay_order_id", $atlaspayOrderId, "id_order", $randomString);
         update("Payment_report", "atlaspay_tracking_code", $trackingCode, "id_order", $randomString);
         update("Payment_report", "atlaspay_payment_url", $paymentUrl, "id_order", $randomString);
-        update("Payment_report", "price", $totalAmountToman, "id_order", $randomString);
+        update("Payment_report", "atlaspay_total_amount", $totalAmountToman, "id_order", $randomString);
+        rxPaymentV2Mark($randomString, ['atlaspay_created_at' => time()]);
         $paymentkeyboard = json_encode([
             'inline_keyboard' => [
                 [
@@ -5089,6 +5228,9 @@ $textonebuy
         $Payment_Method = "Star Telegram";
         $stmt->bind_param("sssssss", $from_id, $randomString, $dateacc, $user['Processing_value'], $payment_Status, $Payment_Method, $invoice);
         $stmt->execute();
+        if (function_exists('rxPaymentV2Mark')) {
+            rxPaymentV2Mark($randomString, ['stars_amount' => $starAmount]);
+        }
         $affilnecurrency = select("PaySetting", "*", "NamePay", "walletaddress", "select")['ValuePay'];
         $invoiceParams = [
             'title' => "Buy for Price {$user['Processing_value']}",

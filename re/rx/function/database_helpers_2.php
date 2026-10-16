@@ -1370,6 +1370,13 @@ function trnado($order_id, $price)
         $endpoints = ['https://bot.tronado.cloud/api/v5/GetOrderToken'];
     }
 
+    if (trim((string) $domainhosts) === '' || preg_match('#^(localhost|127\.|\d{1,3}(\.\d{1,3}){3}$)#i', trim((string) $domainhosts))) {
+        return [
+            'success' => false,
+            'error' => 'دامنه‌ی ربات برای آدرس Callback ترونادو تنظیم نشده یا معتبر نیست',
+        ];
+    }
+
     $callbackUrl = 'https://' . $domainhosts . '/payment/tronado.php';
     $requestPayload = [
         'PaymentID' => (string) $order_id,
@@ -1399,6 +1406,9 @@ function trnado($order_id, $price)
 
         return $errorPayload;
     }
+
+    $decodedResponse['rx_tron_amount'] = $tronAmount;
+    $decodedResponse['rx_wage'] = $wageFromBusinessPercentage;
 
     return $decodedResponse;
 }
@@ -1647,7 +1657,10 @@ function tonpayPaymentMode()
 {
     $row = select("PaySetting", "ValuePay", "NamePay", "tonpay_payment_mode", "select");
     $mode = is_array($row) ? strtolower(trim((string) ($row['ValuePay'] ?? ''))) : '';
-    return $mode === 'web' ? 'web' : 'bot';
+    if ($mode === 'web' || $mode === 'custom') {
+        return $mode;
+    }
+    return 'bot';
 }
 
 function tonpaySelectPaymentUrl($botUrl, $webUrl, $logOrderId = null)
@@ -1751,7 +1764,7 @@ function tonpaySyncTerminalStatus($orderId, $remoteStatus)
     }
 }
 
-function tonpayCurlJson($method, $endpoint, array $payload, $apiKey)
+function tonpayCurlJson($method, $endpoint, array $payload, $apiKey, $multipart = false)
 {
     if (!tonpayRateLimitAcquire()) {
         error_log('TonPay request skipped by local rate limiter: ' . json_encode([
@@ -1768,7 +1781,7 @@ function tonpayCurlJson($method, $endpoint, array $payload, $apiKey)
         ];
     }
 
-    $headers = ['Content-Type: application/json'];
+    $headers = $multipart ? [] : ['Content-Type: application/json'];
     if ($apiKey !== null) {
         $headers[] = 'X-API-Key: ' . $apiKey;
     }
@@ -1794,7 +1807,11 @@ function tonpayCurlJson($method, $endpoint, array $payload, $apiKey)
         },
     );
     if ($method === 'POST') {
-        $opts[CURLOPT_POSTFIELDS] = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($multipart) {
+            $opts[CURLOPT_POSTFIELDS] = $payload;
+        } else {
+            $opts[CURLOPT_POSTFIELDS] = empty($payload) ? '{}' : json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
     }
     curl_setopt_array($curl, $opts);
 
@@ -1932,7 +1949,7 @@ function atlaspayCurlJson($method, $endpoint, array $payload, $apiKey)
         CURLOPT_HTTPHEADER => $headers,
     );
     if ($method === 'POST') {
-        $opts[CURLOPT_POSTFIELDS] = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $opts[CURLOPT_POSTFIELDS] = empty($payload) ? '{}' : json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
     curl_setopt_array($curl, $opts);
 
@@ -2077,7 +2094,11 @@ function blupalCurlJson($method, $endpoint, array $payload, $apiKey)
         CURLOPT_HTTPHEADER => $headers,
     );
     if ($method === 'POST') {
-        $opts[CURLOPT_POSTFIELDS] = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($multipart) {
+            $opts[CURLOPT_POSTFIELDS] = $payload;
+        } else {
+            $opts[CURLOPT_POSTFIELDS] = empty($payload) ? '{}' : json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
     }
     curl_setopt_array($curl, $opts);
 
@@ -2190,7 +2211,11 @@ function cubepayCurlJson($method, $endpoint, array $payload, $apiToken)
         CURLOPT_HTTPHEADER => $headers,
     );
     if ($method === 'POST') {
-        $opts[CURLOPT_POSTFIELDS] = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($multipart) {
+            $opts[CURLOPT_POSTFIELDS] = $payload;
+        } else {
+            $opts[CURLOPT_POSTFIELDS] = empty($payload) ? '{}' : json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
     }
     curl_setopt_array($curl, $opts);
 

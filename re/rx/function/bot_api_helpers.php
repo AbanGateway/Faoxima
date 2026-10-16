@@ -161,6 +161,13 @@ function rx_send_banner_message($chat_id, $section, $text, $keyboard = null, $pa
         }
     }
     if ($status == '1' && $fileId !== '' && !$startMediaActive) {
+        if (function_exists('rx_richUi_sendBanner')) {
+            $richBannerResult = rx_richUi_sendBanner($chat_id, $fileId, $text, $keyboard, $parse_mode, $section === 'start' ? 'main_menu' : null);
+            if (is_array($richBannerResult)) {
+                rx_decor_record($chat_id, $richBannerResult, 'screen', $section);
+                return $richBannerResult;
+            }
+        }
         $photoResult = telegram('sendphoto', [
             'chat_id' => $chat_id,
             'photo' => $fileId,
@@ -169,6 +176,7 @@ function rx_send_banner_message($chat_id, $section, $text, $keyboard = null, $pa
             'parse_mode' => $parse_mode,
         ]);
         if (is_array($photoResult) && !empty($photoResult['ok'])) {
+            rx_decor_record($chat_id, $photoResult, 'screen', $section);
             return $photoResult;
         }
     }
@@ -472,6 +480,7 @@ function rx_section_media_send($section, $chat_id)
         }
         $result = rx_start_media_dispatch($chat_id, $config);
         if (is_array($result) && !empty($result['ok'])) {
+            rx_decor_record($chat_id, $result, 'separate', (string) $section);
             return true;
         }
         $description = is_array($result) ? (string)($result['description'] ?? 'unknown error') : 'no response';
@@ -545,6 +554,7 @@ function rx_send_buy_first_step($chat_id, $message_id, $datain, $text, $keyboard
             if ($isCallback) {
                 deletemessage($chat_id, $message_id);
             }
+            rx_decor_record($chat_id, $photoResult, 'screen', 'buy');
             return $photoResult;
         }
     }

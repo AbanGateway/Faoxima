@@ -535,6 +535,56 @@ function renderGatewayTimeout(view, opts) {
 }
 
 
+let _tonpayCustomModulePromise = null;
+function loadTonpayCustom() {
+    if (_tonpayCustomModulePromise) return _tonpayCustomModulePromise;
+    _tonpayCustomModulePromise = import('./pages/tonpay-custom.js?v=0.0.7');
+    return _tonpayCustomModulePromise;
+}
+
+export function startTonpayCustomFlow(rootView, obj, opts = {}) {
+    const orderId = String(obj.order_id || '');
+    if (!rootView || !orderId) return;
+    loadTonpayCustom().then((mod) => {
+        if (!mod || typeof mod.startTonpayCustom !== 'function') return;
+        const cleanup = mod.startTonpayCustom(rootView, orderId, {
+            mode: opts.purchaseUsername ? 'direct_buy' : 'recharge',
+            initialView: obj.view || null,
+            onSuccess: (statusObj) => renderGatewaySuccess(rootView, statusObj, opts),
+            onFail: (statusObj) => renderGatewayFail(rootView, statusObj, opts),
+        });
+        if (typeof cleanup === 'function' && opts.onCleanup) opts.onCleanup(cleanup);
+    }).catch((err) => {
+        console.warn('[payment-ui] tonpay-custom load failed', err);
+    });
+}
+
+
+let _atlaspayCustomModulePromise = null;
+function loadAtlaspayCustom() {
+    if (_atlaspayCustomModulePromise) return _atlaspayCustomModulePromise;
+    _atlaspayCustomModulePromise = import('./pages/atlaspay-custom.js?v=0.0.1');
+    return _atlaspayCustomModulePromise;
+}
+
+export function startAtlaspayCustomFlow(rootView, obj, opts = {}) {
+    const orderId = String(obj.order_id || '');
+    if (!rootView || !orderId) return;
+    loadAtlaspayCustom().then((mod) => {
+        if (!mod || typeof mod.startAtlaspayCustom !== 'function') return;
+        const cleanup = mod.startAtlaspayCustom(rootView, orderId, {
+            mode: opts.purchaseUsername ? 'direct_buy' : 'recharge',
+            initialView: obj.view || null,
+            onSuccess: (statusObj) => renderGatewaySuccess(rootView, statusObj, opts),
+            onFail: (statusObj) => renderGatewayFail(rootView, statusObj, opts),
+        });
+        if (typeof cleanup === 'function' && opts.onCleanup) opts.onCleanup(cleanup);
+    }).catch((err) => {
+        console.warn('[payment-ui] atlaspay-custom load failed', err);
+    });
+}
+
+
 export function startUrlGatewayFlow(rootView, methodId, obj, opts = {}) {
     const orderId = String(obj.order_id || '');
     const url = String(obj.url || '');
@@ -799,6 +849,20 @@ export function handleInitResult(view, methodId, obj, opts = {}) {
                     </a>
                 </div>
             </div>`;
+        return;
+    }
+
+    if (obj.kind === 'tonpay_custom') {
+        if ($form) $form.innerHTML = '';
+        const customRoot = opts.rootView && opts.rootView instanceof HTMLElement ? opts.rootView : view;
+        startTonpayCustomFlow(customRoot, obj, opts);
+        return;
+    }
+
+    if (obj.kind === 'atlaspay_custom') {
+        if ($form) $form.innerHTML = '';
+        const customRoot = opts.rootView && opts.rootView instanceof HTMLElement ? opts.rootView : view;
+        startAtlaspayCustomFlow(customRoot, obj, opts);
         return;
     }
 

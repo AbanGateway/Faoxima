@@ -516,6 +516,7 @@ if (isset($pdo) && $pdo instanceof PDO) {
                 <ul class="sidebar-menu">
                     <li><a href="textbot.php"><span class="menu-symbol"><?php echo icon('text', 'svg-icon'); ?></span><span>متن‌های ربات</span></a></li>
                     <li><a href="keyboard.php"><span class="menu-symbol"><?php echo icon('keyboard', 'svg-icon'); ?></span><span>چیدمان کیبورد</span></a></li>
+                    <li><a href="account_layout.php"><span class="menu-symbol"><?php echo icon('wallet', 'svg-icon'); ?></span><span>چیدمان حساب</span></a></li>
                     <li><a href="service_keyboard.php"><span class="menu-symbol"><?php echo icon('palette', 'svg-icon'); ?></span><span>رنگ‌بندی دکمه‌ها</span></a></li>
                     <li><a href="appearance.php"><span class="menu-symbol"><?php echo icon('sparkles', 'svg-icon'); ?></span><span>تنظیمات ظاهر</span></a></li>
                     <li><a href="miscsettings.php"><span class="menu-symbol"><?php echo icon('sliders', 'svg-icon'); ?></span><span>تنظیمات متفرقه</span></a></li>
