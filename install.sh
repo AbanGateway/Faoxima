@@ -4609,163 +4609,74 @@ filter_runtime_log_noise() {
     '
 }
 
-container_has_error_logs() {
-    local service="$1"
-    dc logs --tail=200 "$service" 2>&1 \
-        | grep -viE '"ok":(true|false)' \
-        | filter_runtime_log_noise \
-        | grep -qiE 'error|exception|fatal|failed|warn|emerg|crit|panic'
-}
-
 view_error_logs() {
-    local page=0
-    local page_size=20
     local -A hidden_from_view=()
 
     while true; do
         show_logo
         ui_panel "VIEW ERROR LOGS" "$C_BOLD$C_GREEN" "$C_GREEN" \
-            "${C_WHITE}Pick a log to view — nothing is shown automatically.${C_RESET}" \
-            "${C_DIM}Scans ${PROJECT_DIR} and ${BOTS_DIR} for app-level log files, plus bot containers that have logged an error.${C_RESET}"
+            "${C_WHITE}Pick a log file to view — nothing is shown automatically.${C_RESET}" \
+            "${C_DIM}Scans ${PROJECT_DIR} and ${BOTS_DIR} for non-empty application log files (error_log and *.log).${C_RESET}"
 
-        local bot_names=() d
-        if [ -d "$BOTS_DIR" ]; then
-            for d in "${BOTS_DIR}"/*/; do
-                [ -d "$d" ] || continue
-                bot_names+=("$(basename "$d")")
-            done
-        fi
-        local bot_total="${#bot_names[@]}"
-        local bot_page_size=18
-        local bot_last_page=$(( (bot_total - 1) / bot_page_size ))
-        [ "$bot_last_page" -lt 0 ] && bot_last_page=0
-        [ "$page" -gt "$bot_last_page" ] && page="$bot_last_page"
-
-        local KINDS=() PATHS=()
-        if [ -f "$COMPOSE_FILE" ]; then
-            [ -z "${hidden_from_view[container|nginx]:-}" ] && container_has_error_logs nginx && { KINDS+=("container"); PATHS+=("nginx"); }
-            [ -z "${hidden_from_view[container|app]:-}" ] && container_has_error_logs app && { KINDS+=("container"); PATHS+=("app"); }
-        fi
-        if [ "$bot_total" -gt 0 ]; then
-            local bstart=$((page * bot_page_size))
-            local bend=$((bstart + bot_page_size))
-            [ "$bend" -gt "$bot_total" ] && bend="$bot_total"
-            local bi name
-            for ((bi = bstart; bi < bend; bi++)); do
-                name="${bot_names[$bi]}"
-                [ -z "${hidden_from_view[container|app_${name}]:-}" ] && container_has_error_logs "app_${name}" && { KINDS+=("container"); PATHS+=("app_${name}"); }
-            done
-        fi
-
-        local LOGS=()
-        mapfile -t LOGS < <(find "$PROJECT_DIR" "$BOTS_DIR" -type f \( -name 'error_log' -o -name '*.log' \) 2>/dev/null | sort)
-        local f
+        local PATHS=() LOGS=() f
+        mapfile -t LOGS < <(find "$PROJECT_DIR" "$BOTS_DIR" -type f -size +0 \( -name 'error_log' -o -name '*.log' \) 2>/dev/null | sort -u)
         for f in "${LOGS[@]}"; do
-            [ -n "${hidden_from_view[file|${f}]:-}" ] && continue
-            KINDS+=("file")
+            [ -n "${hidden_from_view[$f]:-}" ] && continue
             PATHS+=("$f")
         done
 
         if [ "${#PATHS[@]}" -eq 0 ]; then
             if [ "${#hidden_from_view[@]}" -gt 0 ]; then
-                ui_ok "No logs to show (some entries are hidden from this session's view)."
-            elif [ "$bot_total" -eq 0 ]; then
-                ui_ok "No logs found (no on-disk log files, and no compose stack installed)."
+                ui_ok "No log files to show (some entries are hidden from this session's view)."
             else
-                ui_ok "No logs found (no on-disk log files, and no bot containers currently have errors)."
+                ui_ok "No application log files found."
             fi
             return 0
         fi
 
-        if [ "$bot_last_page" -gt 0 ]; then
-            ui_info "Checking additional bots' containers page $((page + 1)) of $((bot_last_page + 1)) (nginx/app + on-disk logs are always shown in full)."
-        fi
-
-        ui_ok "Found ${#PATHS[@]} log source(s) on this view:"
+        ui_ok "Found ${#PATHS[@]} log file(s):"
         printf '\n'
         local idx size
         for ((idx = 0; idx < ${#PATHS[@]}; idx++)); do
-            if [ "${KINDS[$idx]}" = "container" ]; then
-                printf '  %s%2d)%s [container] %s\n' "$C_YELLOW" "$((idx + 1))" "$C_RESET" "${PATHS[$idx]}"
-            else
-                size=$(du -h "${PATHS[$idx]}" 2>/dev/null | awk '{print $1}')
-                printf '  %s%2d)%s %s  %s(%s)%s\n' "$C_YELLOW" "$((idx + 1))" "$C_RESET" "${PATHS[$idx]}" "$C_DIM" "${size:-?}" "$C_RESET"
-            fi
-        done
-        local has_deletable_file=0 ci
-        for ((ci = 0; ci < ${#KINDS[@]}; ci++)); do
-            [ "${KINDS[$ci]}" = "file" ] && { has_deletable_file=1; break; }
+            size=$(du -h "${PATHS[$idx]}" 2>/dev/null | awk '{print $1}')
+            printf '  %s%2d)%s %s  %s(%s)%s\n' "$C_YELLOW" "$((idx + 1))" "$C_RESET" "${PATHS[$idx]}" "$C_DIM" "${size:-?}" "$C_RESET"
         done
 
-        local delete_option=0
-        local max_option="${#PATHS[@]}"
-        if [ "$has_deletable_file" -eq 1 ]; then
-            delete_option=$(( ${#PATHS[@]} + 1 ))
-            max_option="$delete_option"
-            printf '  %s%2d)%s %sDelete a log%s\n' "$C_RED" "$delete_option" "$C_RESET" "$C_RED" "$C_RESET"
-        fi
+        local delete_option=$(( ${#PATHS[@]} + 1 ))
+        printf '  %s%2d)%s %sDelete a log%s\n' "$C_RED" "$delete_option" "$C_RESET" "$C_RED" "$C_RESET"
 
-        if [ "$bot_last_page" -gt 0 ]; then
-            printf '\n  %s(bot container page %d of %d)%s\n' "$C_DIM" "$((page + 1))" "$((bot_last_page + 1))" "$C_RESET"
-        fi
-        local nav_hint=""
-        [ "$bot_last_page" -gt 0 ] && [ "$page" -lt "$bot_last_page" ] && nav_hint="${nav_hint}n) next bot page  "
-        [ "$bot_last_page" -gt 0 ] && [ "$page" -gt 0 ] && nav_hint="${nav_hint}p) previous bot page  "
-
-        printf '\n  %s❯%s Select an option [1-%d], %sor Enter to return to main menu: ' \
-            "$C_YELLOW" "$C_RESET" "$max_option" "$nav_hint"
+        printf '\n  %s❯%s Select an option [1-%d], or Enter to return to main menu: ' \
+            "$C_YELLOW" "$C_RESET" "$delete_option"
         local choice; read -r choice
         [ -z "$choice" ] && return 0
 
-        case "$choice" in
-            n|N)
-                [ "$page" -lt "$bot_last_page" ] && page=$((page + 1))
-                continue
-                ;;
-            p|P)
-                [ "$page" -gt 0 ] && page=$((page - 1))
-                continue
-                ;;
-        esac
-
-        if [[ ! "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "$max_option" ]; then
+        if [[ ! "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "$delete_option" ]; then
             ui_err "Invalid selection."
             printf '\n  %s❯%s Press Enter to continue... ' "$C_YELLOW" "$C_RESET"; read -r
             continue
         fi
 
-        if [ "$delete_option" -gt 0 ] && [ "$choice" -eq "$delete_option" ]; then
-            delete_error_logs KINDS PATHS
+        if [ "$choice" -eq "$delete_option" ]; then
+            delete_error_logs PATHS
             printf '\n  %s❯%s Press Enter to return to the log list... ' "$C_YELLOW" "$C_RESET"; read -r
             continue
         fi
 
-        local sel=$((choice - 1))
-        local sel_kind="${KINDS[$sel]}" sel_path="${PATHS[$sel]}" log_output
+        local sel_path="${PATHS[$((choice - 1))]}" log_output
         ui_rule
-        if [ "$sel_kind" = "container" ]; then
-            printf '  %s● %s (last 200 lines)%s\n' "$C_CYAN" "$sel_path" "$C_RESET"
-            ui_rule
-            if log_output=$(dc logs --tail=200 "$sel_path" 2>/dev/null); then
-                printf '%s\n' "$log_output" | filter_runtime_log_noise
-            else
-                ui_err "Could not read ${sel_path} logs."
-            fi
+        printf '  %s● %s%s  %s(last 200 lines)%s\n' "$C_CYAN" "$sel_path" "$C_RESET" "$C_DIM" "$C_RESET"
+        ui_rule
+        if log_output=$(tail -n 200 "$sel_path" 2>/dev/null); then
+            printf '%s\n' "$log_output" | filter_runtime_log_noise
         else
-            printf '  %s● %s%s  %s(last 200 lines)%s\n' "$C_CYAN" "$sel_path" "$C_RESET" "$C_DIM" "$C_RESET"
-            ui_rule
-            if log_output=$(tail -n 200 "$sel_path" 2>/dev/null); then
-                printf '%s\n' "$log_output" | filter_runtime_log_noise
-            else
-                ui_err "Could not read ${sel_path}."
-            fi
+            ui_err "Could not read ${sel_path}."
         fi
 
         printf '\n  %s❯%s 🗑️  Hide this entry from the current view? (y/N): ' "$C_YELLOW" "$C_RESET"
         local hide_confirm; read -r hide_confirm
         if [[ "${hide_confirm,,}" == "y" ]]; then
-            hidden_from_view["${sel_kind}|${sel_path}"]=1
-            ui_ok "The log entry was removed from the current view. The original log source remains unchanged."
+            hidden_from_view["$sel_path"]=1
+            ui_ok "The log entry was removed from the current view. The original log file remains unchanged."
         fi
 
         printf '\n  %s❯%s Press Enter to return to the log list... ' "$C_YELLOW" "$C_RESET"; read -r
@@ -4773,18 +4684,18 @@ view_error_logs() {
 }
 
 delete_error_logs() {
-    local -n kinds_ref="$1" paths_ref="$2"
+    local -n paths_ref="$1"
     local file_idx=() i
     for ((i = 0; i < ${#paths_ref[@]}; i++)); do
-        [ "${kinds_ref[$i]}" = "file" ] && file_idx+=("$i")
+        file_idx+=("$i")
     done
 
     if [ "${#file_idx[@]}" -eq 0 ]; then
-        ui_warn "No on-disk log files to delete (container logs can't be deleted, only viewed)."
+        ui_warn "No log files to delete."
         return 0
     fi
 
-    printf '\n  %s❯%s Delete ALL %d on-disk log file(s)? (y/N): ' "$C_YELLOW" "$C_RESET" "${#file_idx[@]}"
+    printf '\n  %s❯%s Delete ALL %d log file(s)? (y/N): ' "$C_YELLOW" "$C_RESET" "${#file_idx[@]}"
     local confirm_all; read -r confirm_all
     if [[ "${confirm_all,,}" == "y" ]]; then
         local i deleted=0 failed=0
@@ -4844,7 +4755,7 @@ delete_error_logs() {
             return 1
         fi
         local sel=$((pick - 1))
-        if [ "$sel" -lt 0 ] || [ "$sel" -ge "${#paths_ref[@]}" ] || [ "${kinds_ref[$sel]}" != "file" ]; then
+        if [ "$sel" -lt 0 ] || [ "$sel" -ge "${#paths_ref[@]}" ]; then
             ui_err "Invalid selection."
             return 1
         fi
