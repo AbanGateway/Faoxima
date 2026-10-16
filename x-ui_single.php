@@ -1258,7 +1258,8 @@ function updateClient($namepanel, $uuid, array $config)
             'email', 'totalGB', 'expiryTime', 'enable', 'tgId', 'subId', 'limitIp',
             'limitHwid', 'reset', 'comment', 'flow', 'security', 'password', 'auth', 'privateKey',
             'publicKey', 'preSharedKey', 'allowedIPs', 'keepAlive', 'secret', 'adTag',
-            'group', 'reverse',
+            'group', 'reverse', 'resetDay', 'resetMax', 'resetWeekday', 'trafficReset',
+            'trafficResetDay', 'allowedIPsByInbound', 'forwardedPorts',
         );
         $safeClient = array();
         foreach ($allowedClientKeys as $allowedKey) {
