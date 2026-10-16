@@ -3670,6 +3670,8 @@ $nameconfig";
         if ($nameloc['name_product'] == "سرویس تست") {
             update("invoice", "name_product", $prodcut['name_product'], "id_invoice", $nameloc['id_invoice']);
             update("invoice", "price_product", $prodcut['price_product'], "id_invoice", $nameloc['id_invoice']);
+        } elseif (rxRenewalNormalizeProductCode($prodcut['code_product'] ?? '') !== 'custom_volume' && rxRenewalIsAppliedVerified($extend)) {
+            rxRenewalSyncInvoiceName($nameloc['id_invoice'], $prodcut['name_product'] ?? '');
         }
         if (($nameloc['Status'] ?? '') !== 'disablebyadmin') {
             update("invoice", "Status", "active", "id_invoice", $id_invoice);

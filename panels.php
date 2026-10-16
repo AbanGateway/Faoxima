@@ -2426,6 +2426,7 @@ class ManagePanel
         return $this->applyRenewalPlan($panel, $data_user, $invoice, $product, $rxPlan, array_merge($rxOptions, array(
             'username' => (string) $username,
             'method' => (string) $Method_extend,
+            'product_name' => (string) ($product['name_product'] ?? ''),
         )));
     }
 
@@ -2660,7 +2661,7 @@ class ManagePanel
                 'method' => $opts['method'] ?? null,
                 'policy' => $plan['policy'] ?? null,
                 'before' => $before,
-                'target' => $plan,
+                'target' => (trim((string) ($opts['product_name'] ?? '')) !== '' && !isset($plan['rx_product_name'])) ? array_merge($plan, array('rx_product_name' => trim((string) $opts['product_name']))) : $plan,
                 'finalize' => is_array($opts['finalize'] ?? null) ? $opts['finalize'] : null,
             ))) {
                 $rxLogFail('apply_persist', 'operation_persist_failed', 'none');

@@ -3900,6 +3900,8 @@ $textonebuy
         if ($rxWasTestService) {
             update("invoice", "name_product", $prodcut['name_product'], "id_invoice", $nameloc['id_invoice']);
             update("invoice", "price_product", $prodcut['price_product'], "id_invoice", $nameloc['id_invoice']);
+        } elseif ($codeproduct !== 'custom_volume' && rxRenewalIsAppliedVerified($extend, $rxAfterState ?? null)) {
+            rxRenewalSyncInvoiceName($nameloc['id_invoice'] ?? '', $prodcut['name_product'] ?? '');
         }
 
         MiniDiscount::logSale([
@@ -3976,6 +3978,10 @@ $textonebuy
                 $textextend .= "\n" . rxRenewalResultText($rxBeforeState, $rxAfterState);
             } elseif (($rxOutcomeText = rxRenewalOutcomeText($extend)) !== '') {
                 $textextend .= "\n" . $rxOutcomeText;
+            }
+            $rxSameLinkNote = rxRenewalSameLinkNote($extend, (string) ($marzban_list_get['type'] ?? ''), $rxAfterState ?? null);
+            if ($rxSameLinkNote !== '') {
+                $textextend .= "\n\n" . $rxSameLinkNote;
             }
         }
         sendmessage($Balance_id['id'], $textextend, $keyboardextendfnished, 'HTML');

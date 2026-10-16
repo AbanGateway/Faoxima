@@ -539,6 +539,8 @@ final class ServiceRenewConfirmHandler extends BaseHandler
         if ($renewApplied && ($invoice['name_product'] ?? '') === 'سرویس تست') {
             update('invoice', 'name_product',  $product['name_product'],  'id_invoice', $invoice['id_invoice']);
             update('invoice', 'price_product', $product['price_product'], 'id_invoice', $invoice['id_invoice']);
+        } elseif ($renewApplied && rxRenewalNormalizeProductCode((string)($product['code_product'] ?? '')) !== 'custom_volume' && rxRenewalIsAppliedVerified($extend)) {
+            rxRenewalSyncInvoiceName($invoice['id_invoice'] ?? '', $product['name_product'] ?? '');
         }
 
 

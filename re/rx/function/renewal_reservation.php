@@ -1256,6 +1256,16 @@ if (!function_exists('rxRenewalOpsReconcile')) {
     }
 }
 
+if (!function_exists('rxRenewalOpSyncInvoiceName')) {
+    function rxRenewalOpSyncInvoiceName(array $op, $target): bool
+    {
+        if (!in_array((string) ($op['source'] ?? ''), ['wallet', 'miniapp'], true) || !is_array($target)) {
+            return false;
+        }
+        return rxRenewalSyncInvoiceName($op['id_invoice'] ?? '', $target['rx_product_name'] ?? '');
+    }
+}
+
 if (!function_exists('rxRenewalOpReconcileOne')) {
     function rxRenewalOpReconcileOne($managePanel, array $op, int $now): array
     {
@@ -1313,6 +1323,7 @@ if (!function_exists('rxRenewalOpReconcileOne')) {
                 if (is_array($panel) && method_exists($managePanel, 'rxRenewalLocalSuccess')) {
                     $managePanel->rxRenewalLocalSuccess($panel, (string) $op['username'], (string) ($op['id_invoice'] ?? ''));
                 }
+                rxRenewalOpSyncInvoiceName($op, $target);
                 return ['op_id' => $opId, 'outcome' => 'verified', 'op' => $op, 'after' => rx_pf_limits($snapshot)];
             }
             $res = $managePanel->applyStoredRenewalPlan((string) $op['name_panel'], (string) $op['username'], $target, [
@@ -1325,6 +1336,7 @@ if (!function_exists('rxRenewalOpReconcileOne')) {
                 'id_invoice' => (string) ($op['id_invoice'] ?? ''),
             ]);
             if (is_array($res) && !empty($res['status'])) {
+                rxRenewalOpSyncInvoiceName($op, $target);
                 return ['op_id' => $opId, 'outcome' => 'verified', 'op' => $op, 'after' => $res['rx_renewal']['after'] ?? null];
             }
             return $back('reapply_failed: ' . (is_array($res) ? (string) ($res['code'] ?? '') : ''));

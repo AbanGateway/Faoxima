@@ -114,7 +114,11 @@ if (!(function_exists('rx_cron_time_up') && rx_cron_time_up()) && (int) $w === 0
         if ($outcome === 'verified') {
             $invoice = !empty($op['id_invoice']) ? select("invoice", "*", "id_invoice", $op['id_invoice'], "select") : null;
             if (is_array($invoice) && (string) ($invoice['id_user'] ?? '') !== '' && (string) ($op['source'] ?? '') !== 'admin') {
-                sendmessage($invoice['id_user'], rxRenewalText('reconciled_user_tpl', ['username' => $rxQrEsc($op['username'] ?? '')]), null, 'HTML', $invoice['bottype'] ?? null);
+                $rxQrReconciledText = rxRenewalText('reconciled_user_tpl', ['username' => $rxQrEsc($op['username'] ?? '')]);
+                if (is_array($result['after'] ?? null) && rxRenewalSameLinkSupported(rx_rn_panel_type((string) ($op['name_panel'] ?? '')))) {
+                    $rxQrReconciledText .= "\n\n" . trim(rxRenewalText('success_same_link'));
+                }
+                sendmessage($invoice['id_user'], $rxQrReconciledText, null, 'HTML', $invoice['bottype'] ?? null);
             }
             $rxQrReport("✅ تمدید نامشخص پس از بررسی خودکار تأیید شد\n\n<blockquote>شناسه عملیات : <code>" . $rxQrEsc($op['op_id'] ?? '') . "</code></blockquote>\n<blockquote>نام کاربری سرویس : <code>" . $rxQrEsc($op['username'] ?? '') . "</code></blockquote>\n<blockquote>نام پنل : " . $rxQrEsc($op['name_panel'] ?? '') . "</blockquote>");
         }

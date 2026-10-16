@@ -1303,6 +1303,7 @@ if (!function_exists('rxRenewalTextDefaults')) {
             'reservation_notice' => '📌 رزرو اشتراک: {status}\n⏱ زمان فعال‌سازی: {trigger}\n⚙️ سیاست اجرا: {policy}',
             'reservation_failed_user_tpl' => "⚠️ فعال‌سازی رزرو اشتراک سرویس {username} با مشکل مواجه شد و برای بررسی به پشتیبانی ارسال شد. بسته رزرو شما محفوظ است.",
             'reconciled_user_tpl' => '✅ تمدید سرویس {username} در پنل تأیید و اعمال شد.',
+            'success_same_link' => "🔗 لینک اشتراک شما همان لینک قبلی است و نیازی به دریافت کد یا کانفیگ جدید ندارید.\nبرای دریافت اطلاعات و کانفیگ‌های به‌روز، در برنامهٔ اتصال خود یک بار «به‌روزرسانی اشتراک» را بزنید.",
             'result_line_expire' => '⏳ انقضا : {before} ← {after}',
             'result_line_limit' => '📦 حجم کل : {before} ← {after}',
             'result_line_remaining' => '🔋 حجم باقی‌مانده : {before} ← {after}',
@@ -2265,6 +2266,62 @@ if (!function_exists('rxRenewalOutcomeText')) {
     }
 }
 
+if (!function_exists('rxRenewalIsAppliedVerified')) {
+    function rxRenewalIsAppliedVerified($extend, $afterState = null): bool
+    {
+        if (!is_array($extend) || empty($extend['status']) || rxRenewalIsPending($extend)) {
+            return false;
+        }
+        if (!empty($extend['queued']) || !empty($extend['stock']) || !empty($extend['subscription_url']) || !empty($extend['file_ext'])) {
+            return false;
+        }
+        if (is_array($extend['rx_renewal'] ?? null)) {
+            $renewal = $extend['rx_renewal'];
+            return !empty($renewal['verified']) && is_array($renewal['before'] ?? null) && is_array($renewal['after'] ?? null);
+        }
+        return !empty($extend['reconciled']) && is_array($afterState);
+    }
+}
+
+if (!function_exists('rxRenewalSameLinkSupported')) {
+    function rxRenewalSameLinkSupported($panelType): bool
+    {
+        return in_array((string) $panelType, ['marzban', 'pasarguard'], true);
+    }
+}
+
+if (!function_exists('rxRenewalSameLinkNote')) {
+    function rxRenewalSameLinkNote($extend, $panelType, $afterState = null): string
+    {
+        if (!rxRenewalSameLinkSupported($panelType) || !rxRenewalIsAppliedVerified($extend, $afterState)) {
+            return '';
+        }
+        return trim(rxRenewalText('success_same_link'));
+    }
+}
+
+if (!function_exists('rxRenewalSyncInvoiceName')) {
+    function rxRenewalSyncInvoiceName($idInvoice, $productName): bool
+    {
+        $idInvoice = trim((string) $idInvoice);
+        $productName = trim((string) $productName);
+        if ($idInvoice === '' || $productName === '' || !function_exists('select') || !function_exists('update')) {
+            return false;
+        }
+        try {
+            $row = select('invoice', 'name_product', 'id_invoice', $idInvoice, 'select');
+            if (!is_array($row) || (string) ($row['name_product'] ?? '') === $productName) {
+                return false;
+            }
+            update('invoice', 'name_product', $productName, 'id_invoice', $idInvoice);
+            return true;
+        } catch (Throwable $e) {
+            rx_pf_log('RENEWAL_INVOICE_NAME_SYNC_FAILED', $e->getMessage(), ['id_invoice' => $idInvoice]);
+            return false;
+        }
+    }
+}
+
 if (!function_exists('rxRenewalDecorateSuccess')) {
     function rxRenewalDecorateSuccess(string $successText, $extend, string $username, string $panelName): string
     {
@@ -2276,7 +2333,9 @@ if (!function_exists('rxRenewalDecorateSuccess')) {
         }
         $renewal = $extend['rx_renewal'];
         if (!empty($renewal['verified']) && is_array($renewal['before'] ?? null) && is_array($renewal['after'] ?? null)) {
-            return rtrim($successText) . "\n\n" . rxRenewalResultText($renewal['before'], $renewal['after']);
+            $decorated = rtrim($successText) . "\n\n" . rxRenewalResultText($renewal['before'], $renewal['after']);
+            $sameLink = rxRenewalSameLinkNote($extend, rx_rn_panel_type($panelName));
+            return $sameLink !== '' ? $decorated . "\n\n" . $sameLink : $decorated;
         }
         rx_renewal_log('result_decoration', 'unverified_result', [
             'username' => $username,

@@ -1692,10 +1692,17 @@ function renderRenewConfirm($panel, opts, choice, username, reload) {
                             <p class="muted" style="white-space:pre-line">${escapeHtml(obj.message || '')}</p>
                             ${obj.cashback ? `<p class="muted mt-sm">🎉 ${fmtNum(obj.cashback)} تومان کش‌بک به حساب شما اضافه شد.</p>` : ''}
                             <p class="muted mono mt-sm" style="font-size:12px">موجودی جدید: ${fmtNum(obj.balance_after)} تومان</p>
+                            <button type="button" class="btn btn-primary btn-block mt-md" data-renew-continue>ادامه</button>
                         </div>
                     </div>`;
                 $host.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                setTimeout(() => reload(), 2200);
+                const $continue = $host.querySelector('[data-renew-continue]');
+                if ($continue) {
+                    $continue.addEventListener('click', () => {
+                        $continue.disabled = true;
+                        reload();
+                    }, { once: true });
+                }
                 return;
             }
             if (obj.kind === 'requires_payment') {
