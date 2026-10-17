@@ -230,7 +230,7 @@ if (isset($pdo) && $pdo instanceof PDO) {
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow-1);
+    box-shadow: none;
     height: 28px;
 }
 [data-theme="dark"] .version-pill,
@@ -243,7 +243,7 @@ if (isset($pdo) && $pdo instanceof PDO) {
     flex-shrink: 0;
     background: #fff;
     margin: 0;
-    box-shadow: var(--shadow-1);
+    box-shadow: none;
 }
 [data-theme="dark"] .version-pill .logo,
 :root:not([data-theme="light"]) .version-pill .logo { box-shadow: none; }
