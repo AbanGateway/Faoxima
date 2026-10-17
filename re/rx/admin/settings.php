@@ -324,7 +324,30 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
         nm_adminInstantReply($from_id, "❌ نام آموزش باید کمتر از 150 کاراکتر باشد", null, 'HTML');
         return;
     }
-    update("help", "name_os", $text, "name_os", $user['Processing_value']);
+    try {
+        $rxHelpStmt = $pdo->prepare("SELECT id FROM help WHERE name_os = ? ORDER BY id LIMIT 1");
+        $rxHelpStmt->execute([(string) $user['Processing_value']]);
+        $rxHelpId = $rxHelpStmt->fetchColumn();
+        if ($rxHelpId === false) {
+            nm_adminInstantReply($from_id, "❌ آموزش انتخاب‌شده یافت نشد. لطفاً دوباره آموزش را انتخاب کنید.", $backadmin, 'HTML');
+            return;
+        }
+        $rxHelpDupStmt = $pdo->prepare("SELECT 1 FROM help WHERE name_os = ? AND id <> ? LIMIT 1");
+        $rxHelpDupStmt->execute([$text, $rxHelpId]);
+        if ($rxHelpDupStmt->fetchColumn() !== false) {
+            nm_adminInstantReply($from_id, "❌ آموزشی با این نام قبلاً ثبت شده است. نام دیگری ارسال کنید.", $backadmin, 'HTML');
+            return;
+        }
+        $rxHelpRenameStmt = $pdo->prepare("UPDATE help SET name_os = ? WHERE id = ?");
+        $rxHelpRenameStmt->execute([$text, $rxHelpId]);
+    } catch (PDOException $e) {
+        error_log('help rename failed: ' . $e->getMessage());
+        nm_adminInstantReply($from_id, "❌ بروزرسانی نام آموزش ناموفق بود. دوباره تلاش کنید.", $backadmin, 'HTML');
+        return;
+    }
+    clearSelectCache('help');
+    update("user", "Processing_value", $text, "id", $from_id);
+    $user['Processing_value'] = $text;
     nm_adminInstantReply($from_id, "✅ نام آموزش بروزرسانی شد", $helpedit, 'HTML');
     step('help_edit', $from_id);
 } elseif ($text == "ویرایش دسته بندی" && $adminrulecheck['rule'] == "administrator") {
