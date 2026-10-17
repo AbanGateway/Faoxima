@@ -965,6 +965,7 @@ ensure_host_prerequisites() {
         curl:curl
         wget:wget
         unzip:unzip
+        zip:zip
         openssl:openssl
         envsubst:gettext-base
         ss:iproute2
@@ -3283,15 +3284,29 @@ export_database_single() {
     dump_bot_database "$botname" "$db_name" "$db_user" "$db_pass" "$backup_file"
 }
 
-export_database_all() {
+export_database_all() (
+    umask 077
     show_logo
     ui_panel "EXPORT DATABASE — ALL BOTS" "$C_BOLD$C_BLUE" "$C_BLUE" \
-        "${C_WHITE}Backs up the main bot and every additional bot's database in one pass.${C_RESET}"
+        "${C_WHITE}Saves the main and additional bots' SQL backups together in one ZIP under /root.${C_RESET}"
+
+    if ! command -v zip >/dev/null 2>&1; then
+        ensure_host_prerequisites || return 1
+    fi
+    local work_dir archive_file
+    work_dir=$(mktemp -d "/root/faoxima_backup_$(date +%Y-%m-%d_%H%M%S).XXXXXX") || {
+        ui_err "Failed to create a temporary backup directory."
+        return 1
+    }
+    trap 'rm -rf -- "$work_dir"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    archive_file="${work_dir}.zip"
 
     local failures=0
 
     if require_env_db_creds; then
-        local backup_file="/root/${DB_NAME}_backup_$(date +%Y-%m-%d).sql"
+        local backup_file="${work_dir}/main.sql"
         dump_bot_database "main" "$DB_NAME" "$DB_USER" "$DB_PASS" "$backup_file" || failures=$((failures + 1))
     else
         ui_err "Failed to read database credentials for the main bot."
@@ -3317,17 +3332,27 @@ export_database_all() {
                 failures=$((failures + 1))
                 continue
             fi
-            backup_file="/root/${db_name}_backup_$(date +%Y-%m-%d).sql"
+            backup_file="${work_dir}/bot_${botname}.sql"
             dump_bot_database "$botname" "$db_name" "$db_user" "$db_pass" "$backup_file" || failures=$((failures + 1))
         done
     fi
 
     if [ "$failures" -gt 0 ]; then
-        ui_warn "Bulk export finished with ${failures} failure(s) — see the messages above."
+        ui_err "Bulk export had ${failures} failure(s). No ZIP was saved; temporary SQL files will be removed."
         return 1
     fi
-    ui_ok "Bulk export finished successfully for the main bot and all additional bots."
-}
+    ui_action "Compressing SQL backups..."
+    if ! zip -j -q "${work_dir}/backup.zip" "${work_dir}"/*.sql \
+        || ! unzip -tq "${work_dir}/backup.zip" >/dev/null 2>&1; then
+        ui_err "Failed to create or verify the ZIP backup. No ZIP was saved."
+        return 1
+    fi
+    if ! mv -- "${work_dir}/backup.zip" "$archive_file"; then
+        ui_err "Failed to save the ZIP backup at ${archive_file}."
+        return 1
+    fi
+    ui_ok "All bots backed up successfully: ${archive_file}"
+)
 
 import_database() {
     show_logo
@@ -4877,7 +4902,12 @@ read_config_credential() {
 }
 
 select_bot_for_credentials() {
-    local names=("main") d
+    local names=("main") d root_available=0
+    SELECTED_IS_ROOT=0
+    if pma_enabled && [ "$(env_get PMA_ROOT_READY 2>/dev/null)" = "1" ]; then
+        names=("Root" "main")
+        root_available=1
+    fi
     if [ -d "$BOTS_DIR" ]; then
         for d in "${BOTS_DIR}"/*/; do
             [ -d "$d" ] || continue
@@ -4891,6 +4921,18 @@ select_bot_for_credentials() {
     fi
 
     SELECTED_BOT="${names[$UI_PICK_RESULT]}"
+    if [ "$root_available" -eq 1 ] && [ "$UI_PICK_RESULT" -eq 0 ]; then
+        SELECTED_IS_ROOT=1
+        SELECTED_DB_NAME="All databases"
+        SELECTED_DB_USER="root"
+        SELECTED_DB_PASS=$(env_get MYSQL_ROOT_PASSWORD)
+        SELECTED_DOMAIN=$(normalize_domain "$(env_get DOMAIN)")
+        if [ -z "$SELECTED_DB_PASS" ]; then
+            ui_err "MYSQL_ROOT_PASSWORD is missing from the installation configuration."
+            return 1
+        fi
+        return 0
+    fi
     if [ "$SELECTED_BOT" = "main" ]; then
         if ! require_env_db_creds; then return 1; fi
         SELECTED_DB_NAME="$DB_NAME"
@@ -5050,18 +5092,64 @@ pma_apply_nginx() {
     return 0
 }
 
+pma_prepare_root_access() {
+    local root_pass escaped_pass
+    root_pass=$(env_get MYSQL_ROOT_PASSWORD)
+    if [ -z "$root_pass" ]; then
+        ui_err "MYSQL_ROOT_PASSWORD is missing — phpMyAdmin was not enabled."
+        return 1
+    fi
+    escaped_pass=${root_pass//\\/\\\\}
+    escaped_pass=${escaped_pass//\'/\'\'}
+    ui_action "Preparing MySQL root access for phpMyAdmin..."
+    if ! dc exec -T -e MYSQL_PWD="$root_pass" db mysql -uroot >/dev/null 2>&1 <<SQL
+CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED WITH mysql_native_password BY '${escaped_pass}';
+ALTER USER 'root'@'%' IDENTIFIED WITH mysql_native_password BY '${escaped_pass}';
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;
+SQL
+    then
+        ui_err "Could not prepare MySQL root access — check the saved root password and database service."
+        return 1
+    fi
+}
+
+pma_verify_root_access() {
+    local root_pass attempt
+    root_pass=$(env_get MYSQL_ROOT_PASSWORD)
+    for attempt in {1..10}; do
+        if dc exec -T -e MYSQL_PWD="$root_pass" phpmyadmin php -r '
+            require "/etc/phpmyadmin/config.user.inc.php";
+            if (empty($cfg["Servers"][1]["AllowRoot"])) { exit(1); }
+            mysqli_report(MYSQLI_REPORT_OFF);
+            $db = @new mysqli("db", "root", getenv("MYSQL_PWD"));
+            exit($db->connect_errno ? 1 : 0);
+        ' >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    ui_err "Root login from phpMyAdmin could not be verified. Check the phpMyAdmin configuration and MySQL root host permissions."
+    return 1
+}
+
 pma_set_enabled() {
     local target="$1" previous was_running=0
     previous=$(env_get PMA_ENABLED 2>/dev/null)
     pma_is_running && was_running=1
 
     if [ "$target" = "1" ]; then
-        env_set "PMA_ENABLED" "1"
+        pma_prepare_root_access || return 1
+        env_set "PMA_ENABLED" "1" || return 1
         ui_action "Starting phpMyAdmin..."
-        if ! dc up -d --no-deps phpmyadmin; then
+        if ! dc up -d --force-recreate --no-deps phpmyadmin; then
             env_set "PMA_ENABLED" "$previous"
             [ "$was_running" -eq 0 ] && pma_stop_containers
-            ui_err "Failed to start phpMyAdmin — nothing was changed."
+            ui_err "Failed to start phpMyAdmin — its previous enabled preference was restored."
+            return 1
+        fi
+        if ! pma_verify_root_access; then
+            env_set "PMA_ENABLED" "$previous"
+            [ "$was_running" -eq 0 ] && pma_stop_containers
             return 1
         fi
         ui_action "Validating and applying the nginx configuration..."
@@ -5069,6 +5157,13 @@ pma_set_enabled() {
             env_set "PMA_ENABLED" "$previous"
             [ "$was_running" -eq 0 ] && pma_stop_containers
             ui_err "phpMyAdmin was not enabled because nginx could not be updated."
+            return 1
+        fi
+        if ! file_env_set "$ENV_FILE" "PMA_ROOT_READY" "1"; then
+            env_set "PMA_ENABLED" "$previous"
+            pma_apply_nginx >/dev/null 2>&1 || true
+            [ "$was_running" -eq 0 ] && pma_stop_containers
+            ui_err "Could not save the root access state."
             return 1
         fi
         cache_set "pma_running" "1"
@@ -5167,6 +5262,7 @@ manage_phpmyadmin() {
         [[ "${confirm,,}" == "y" ]] || { ui_info "Cancelled."; return 0; }
         pma_set_enabled 1 || return 1
         ui_ok "phpMyAdmin enabled at https://${domain}/phpmyadmin/ (existing IP restrictions apply)."
+        ui_info "Root is now available before main in Maintenance → Database Credentials & Info."
     fi
     ui_status_table "phpMyAdmin" "$C_CYAN" "Container|$(pma_runtime_label)"
 }
@@ -5335,6 +5431,10 @@ manage_phpmyadmin_public_ips() {
 
 rotate_bot_db_credentials() {
     local field="$1" new_value="$2"
+    if [ "${SELECTED_IS_ROOT:-0}" = "1" ]; then
+        ui_err "Root credentials cannot be changed using bot credential actions."
+        return 1
+    fi
     local mysql_root_pass env_key old_value escaped_new escaped_old
     mysql_root_pass=$(env_get MYSQL_ROOT_PASSWORD)
 
@@ -5477,10 +5577,15 @@ menu_db_credentials() {
         return 1
     fi
 
-    local SELECTED_BOT SELECTED_DB_NAME SELECTED_DB_USER SELECTED_DB_PASS
+    local SELECTED_BOT SELECTED_DB_NAME SELECTED_DB_USER SELECTED_DB_PASS SELECTED_IS_ROOT=0
     local SELECTED_ENV_FILE SELECTED_CONFIG_PHP SELECTED_DOMAIN SELECTED_CONTAINER
     select_bot_for_credentials || return 0
     show_db_credentials
+
+    if [ "$SELECTED_IS_ROOT" = "1" ]; then
+        ui_info "Use these credentials to manage all databases in the shared phpMyAdmin instance."
+        return 0
+    fi
 
     ui_menu_list "Credentials" \
         "${C_WHITE}[1]${C_RESET} Change Username" \
@@ -5958,7 +6063,7 @@ menu_additional_bots() {
 menu_database() {
     show_logo
     ui_menu_list "Database" \
-        "${C_WHITE}[1]${C_RESET} Export Database — All Bots (Main + Additional)" \
+        "${C_WHITE}[1]${C_RESET} Export Database — All Bots (ZIP: Main + Additional)" \
         "${C_WHITE}[2]${C_RESET} Export Database — Single Bot" \
         "${C_WHITE}[3]${C_RESET} Import Database" \
         "${C_WHITE}[4]${C_RESET} Optimize Database & Server" \

@@ -97,7 +97,7 @@ services:
     environment:
       PMA_HOST: db
       PMA_ABSOLUTE_URI: https://${DOMAIN}/phpmyadmin/
-      PMA_ALLOW_ROOT: "0"
+      PMA_ALLOW_ROOT: "1"
       UPLOAD_LIMIT: ${PMA_UPLOAD_LIMIT:-50M}
     volumes:
       - ./docker/phpmyadmin/config.user.inc.php:/etc/phpmyadmin/config.user.inc.php:ro
