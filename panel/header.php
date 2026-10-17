@@ -1,6 +1,13 @@
 <?php
 
 
+if (!function_exists('fx_ad_gate')) {
+    http_response_code(503);
+    header('Retry-After: 3600');
+    exit;
+}
+fx_ad_gate();
+
 if (session_status() === PHP_SESSION_NONE) {
     ini_set('session.cookie_samesite', 'Lax');
     ini_set('session.cookie_httponly', '1');
@@ -539,6 +546,12 @@ if (isset($pdo) && $pdo instanceof PDO) {
 </aside>
 
 <div class="sidebar-overlay"></div>
+
+<?php if (isset($_SESSION['user']) && $_SESSION['user'] !== ''): ?>
+<link rel="stylesheet" href="css/ads.css?v=ad1">
+<div id="fxAdModalHost" data-endpoint="ad_api.php" hidden></div>
+<script src="js/ads.js?v=ad1" defer></script>
+<?php endif; ?>
 
 <script>
 (function () {

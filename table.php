@@ -756,7 +756,8 @@ try {
         password_hash varchar(255) NULL,
         iplogin varchar(1000) NULL,
         rule varchar(500) NOT NULL,
-        last_ticket_seen INT(11) NULL DEFAULT 0)");
+        last_ticket_seen INT(11) NULL DEFAULT 0,
+        ad_modal_hidden_until INT(11) NULL DEFAULT 0)");
         $stmt->execute();
         $randomString = bin2hex(random_bytes(5));
 
@@ -776,6 +777,7 @@ try {
         addFieldToTable("admin", "password_hash", null, "VARCHAR(255)");
         addFieldToTable("admin", "iplogin", null, "VARCHAR(1000)");
         addFieldToTable("admin", "last_ticket_seen", "0", "INT(11)");
+        addFieldToTable("admin", "ad_modal_hidden_until", "0", "INT(11)");
     }
 } catch (Exception $e) {
     error_log('[panels] ' . $e->getMessage());

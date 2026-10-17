@@ -32,12 +32,17 @@ if ((!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off
 }
 session_start();
 require_once __DIR__ . '/../config.php';
+if (!@include_once __DIR__ . '/lib/ad_boot.php') { http_response_code(503); header('Retry-After: 3600'); exit; }
 require_once __DIR__ . '/lib/icons.php';
 require_once __DIR__ . '/../function.php';
 require_once __DIR__ . '/../botapi.php';
 require_once __DIR__ . '/../jdf.php';
 
 $user_ip = $_SERVER['REMOTE_ADDR'] ?? '';
+fx_ad_gate();
+if (empty($_SESSION['fx_ad_nonce'])) {
+    $_SESSION['fx_ad_nonce'] = bin2hex(random_bytes(16));
+}
 
 $texterrr = "";
 $ip_denied = false;
@@ -160,6 +165,7 @@ if (isset($_POST['login'])) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>ورود به پنل مدیریت | فاکسیما</title>
     <link rel="stylesheet" href="css/theme.css?v=flat50">
+    <link rel="stylesheet" href="css/ads.css?v=ad1">
 <script src="js/theme.js?v=flat50" defer>
 
 </script>
@@ -223,6 +229,8 @@ if (isset($_POST['login'])) {
             </p>
 
             
+            <div id="fxAdBanner" data-endpoint="ad_api.php" data-nonce="<?php echo htmlspecialchars((string)$_SESSION['fx_ad_nonce'], ENT_QUOTES, 'UTF-8'); ?>" hidden></div>
+
             <div class="login-social" style="display:flex; gap:10px; justify-content:center; margin-top:18px; padding-top:14px; border-top:1px solid var(--border-soft);">
                 <a href="https://t.me/faoxima" target="_blank" rel="noopener noreferrer"
                    aria-label="کانال تلگرام فاکسیما"
@@ -254,8 +262,11 @@ if (isset($_POST['login'])) {
 
 <?php endif; ?>
 
+<?php if (!$ip_denied): ?>
+<script src="js/ads.js?v=ad1" defer></script>
+<?php endif; ?>
 <script>
-    var SVG_EYE       = '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    var SVG_EYE      = '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
     var SVG_EYE_SLASH = '<svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
     function togglePass() {
         var inp = document.getElementById('passwordInput');
