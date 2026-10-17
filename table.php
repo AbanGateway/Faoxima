@@ -2086,9 +2086,9 @@ try {
         ['dyn_panel_user_unblocked_notice', "✳️ حساب کاربری شما از مسدودی خارج شد ✳️\nاکنون میتوانید از ربات استفاده کنید "],
         ['dyn_panel_user_balance_added_tpl', '💎 کاربر عزیز مبلغ {amount} T به موجودی کیف پول تان اضافه گردید.'],
         ['dyn_panel_user_admin_message_tpl', "📥 یک پیام از مدیریت برای شما ارسال شد.\n\nمتن پیام : {message}"],
-        ['dyn_cron_volume_warning_tpl', "با سلام خدمت شما کاربر گرامی 👋\n🚨 از حجم سرویس {username} تنها {volume} باقی مانده است. لطفاً در صورت تمایل برای خرید حجم اضافه و یا تمدید سرویستون از طریق بخش «{purchased_services}» اقدام بفرمایین"],
+        ['dyn_cron_volume_warning_tpl', "با سلام خدمت شما کاربر گرامی 👋\n🚨 از حجم سرویس «{plan}» شما تنها {volume} باقی مانده است (شناسه سرویس: {username}). لطفاً در صورت تمایل برای خرید حجم اضافه و یا تمدید سرویستون از طریق بخش «{purchased_services}» اقدام بفرمایین"],
         ['dyn_cron_volume_warning_report_tpl', "📌 اطلاعیه کرون حجم\n\nنام کاربری سرویس :‌ <code>{username}</code>\nوضعیت سرویس : {status}\nحجم باقی مانده : {volume}"],
-        ['dyn_cron_time_warning_tpl', "با سلام خدمت شما کاربر گرامی 👋\n📌 از مهلت زمانی استفاده از سرویس {username} فقط {days} روز باقی مانده است. لطفاً در صورت تمایل برای تمدید این سرویس، از طریق بخش «{purchased_services}» اقدام بفرمایین. با تشکر از همراهی شما"],
+        ['dyn_cron_time_warning_tpl', "با سلام خدمت شما کاربر گرامی 👋\n📌 از مهلت زمانی سرویس «{plan}» شما فقط {days_display} روز باقی مانده است (شناسه سرویس: {username}). لطفاً در صورت تمایل برای تمدید این سرویس، از طریق بخش «{purchased_services}» اقدام بفرمایین. با تشکر از همراهی شما"],
         ['dyn_cron_time_warning_report_tpl', "📌 اطلاعیه کرون زمان\n\nنام کاربری سرویس :‌ <code>{username}</code>\nوضعیت سرویس : {status}\nتعداد روز باقی مانده ‌:‌{days}"],
         ['dyn_cron_removal_notice_tpl', "📌 کاربر گرامی بدلیل عدم تمدید، سرویس {username} از لیست سرویس های شما حذف گردید\n\n🌟 جهت تهیه سرویس جدید از بخش خرید سرویس اقدام فرمایید"],
         ['dyn_cron_removal_report_tpl', "📌 اطلاعیه کرون حذف\n\nنام کاربری سرویس :‌ <code>{username}</code>\nوضعیت سرویس : {status}\nتعداد روز باقی مانده ‌:‌{days}\nحجم باقی مانده : {volume}"],
@@ -2121,6 +2121,24 @@ try {
             $rxTonpayWarningOld = $connect->real_escape_string(tonpayLegacyAmountWarningDefault());
             $connect->query("UPDATE textbot SET text = '$rxTonpayWarningNew' WHERE id_text = 'dyn_tonpay_amount_warning' AND text = '$rxTonpayWarningOld'");
             $connect->query("UPDATE textbot SET text = REPLACE(text, '<b>پرداخت کارت‌به‌کارت (تون‌پی)</b>', '<b>{gateway_title}</b>') WHERE id_text IN ('dyn_tonpay_invoice_tpl', 'dyn_tonpay_progress_tpl')");
+        }
+    }
+    $rxCronWarningUpgrades = [
+        'dyn_cron_volume_warning_tpl' => [
+            "با سلام خدمت شما کاربر گرامی 👋\n🚨 از حجم سرویس {username} تنها {volume} باقی مانده است. لطفاً در صورت تمایل برای خرید حجم اضافه و یا تمدید سرویستون از طریق بخش «{purchased_services}» اقدام بفرمایین",
+            "با سلام خدمت شما کاربر گرامی 👋\n🚨 از حجم سرویس «{plan}» شما تنها {volume} باقی مانده است (شناسه سرویس: {username}). لطفاً در صورت تمایل برای خرید حجم اضافه و یا تمدید سرویستون از طریق بخش «{purchased_services}» اقدام بفرمایین",
+        ],
+        'dyn_cron_time_warning_tpl' => [
+            "با سلام خدمت شما کاربر گرامی 👋\n📌 از مهلت زمانی استفاده از سرویس {username} فقط {days} روز باقی مانده است. لطفاً در صورت تمایل برای تمدید این سرویس، از طریق بخش «{purchased_services}» اقدام بفرمایین. با تشکر از همراهی شما",
+            "با سلام خدمت شما کاربر گرامی 👋\n📌 از مهلت زمانی سرویس «{plan}» شما فقط {days_display} روز باقی مانده است (شناسه سرویس: {username}). لطفاً در صورت تمایل برای تمدید این سرویس، از طریق بخش «{purchased_services}» اقدام بفرمایین. با تشکر از همراهی شما",
+        ],
+    ];
+    if ($table_exists) {
+        foreach ($rxCronWarningUpgrades as $rxCronWarningKey => $rxCronWarningPair) {
+            $rxCronWarningKeyEsc = $connect->real_escape_string($rxCronWarningKey);
+            $rxCronWarningOldEsc = $connect->real_escape_string($rxCronWarningPair[0]);
+            $rxCronWarningNewEsc = $connect->real_escape_string($rxCronWarningPair[1]);
+            $connect->query("UPDATE textbot SET text = '$rxCronWarningNewEsc' WHERE id_text = '$rxCronWarningKeyEsc' AND text = '$rxCronWarningOldEsc'");
         }
     }
     if (!$table_exists) {
